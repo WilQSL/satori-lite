@@ -16,7 +16,8 @@ from satorilib.wallet import EvrmoreWallet
 from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
 from satorilib.server.api import CheckinDetails
-from satorilib.centrifugo import publish_to_stream_rest
+# TODO: Commented out for engine-neuron integration
+# from satorilib.centrifugo import publish_to_stream_rest
 from satorineuron import VERSION
 from satorineuron import logging
 from satorineuron import config
@@ -26,6 +27,8 @@ from satorineuron.common.structs import ConnectionTo
 from satorineuron.structs.start import RunMode, UiEndpoint, StartupDagStruct
 from satorilib.datamanager import DataClient, DataServerApi, DataClientApi, Message, Subscription
 from satorilib.utils.ip import getPublicIpv4UsingCurl
+# Engine import for spawning
+from satoriengine.veda.engine import Engine
 
 def getStart():
     """returns StartupDag singleton"""
@@ -111,12 +114,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.dataServerPort: Union[int, None] =  None
         self.dataClient: Union[DataClient, None] = None
         self.allOracleStreams = None
-        # self.engine: satoriengine.Engine
+        self.aiengine: Union[Engine, None] = None
         self.publications: list[Stream] = []
         self.subscriptions: list[Stream] = []
         self.pubSubMapping: dict = {}
-        self.centrifugoToken: str = None
-        self.centrifugoPayload: dict = None
+        # TODO: Commented out for engine-neuron integration
+        # self.centrifugoToken: str = None
+        # self.centrifugoPayload: dict = None
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
         self.data: dict[str, dict[pd.DataFrame, pd.DataFrame]] = {}
         self.streamDisplay: list = []
@@ -429,16 +433,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def networkIsTest(self, network: str = None) -> bool:
         return network.lower().strip() in ("testnet", "test", "ravencoin", "rvn")
 
-    def dataServerFinalize(self):
-        self.sharePubSubInfo()
-        self.populateData()
-        self.subscribeToRawData()
-        self.subscribeToEngineUpdates()
+    # TODO: Commented out for engine-neuron integration - data handled by Engine
+    # def dataServerFinalize(self):
+    #     self.sharePubSubInfo()
+    #     self.populateData()
+    #     self.subscribeToRawData()
+    #     self.subscribeToEngineUpdates()
 
     def start(self):
         """start the satori engine."""
-        self.connectToDataServer()
-        threading.Thread(target=self.stayConnectedForever, daemon=True).start()
+        # TODO: Commented out for engine-neuron integration - data handled by Engine
+        # self.connectToDataServer()
+        # threading.Thread(target=self.stayConnectedForever, daemon=True).start()
         # while True:
         if self.ranOnce:
             time.sleep(60 * 60)
@@ -461,8 +467,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.createServerConn()
         self.checkin()
         self.getBalances()
-        self.centrifugoConnect()
-        self.dataServerFinalize()
+        # Spawn the AI Engine with stream assignments
+        self.spawnEngine()
+        # TODO: Commented out for engine-neuron integration
+        # self.centrifugoConnect()
+        # self.dataServerFinalize()
 
     def startWalletOnly(self):
         """start the satori engine."""
@@ -633,38 +642,39 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return True
         return False
 
-    def populateData(self):
-        """ save real and prediction data in neuron """
-        for k in self.pubSubMapping.keys():
-            if k != 'transferProtocol' and k != 'transferProtocolPayload' and k != 'transferProtocolKey':
-                realDataDf = None
-                predictionDataDf = None
-                try:
-                    realData = asyncio.run(self.dataClient.getLocalStreamData(k))
-                    if realData.status == DataServerApi.statusSuccess.value and isinstance(realData.data, pd.DataFrame):
-                        realDataDf = realData.data.tail(100)
-                    else:
-                        raise Exception(realData.senderMsg)
-                except Exception as e:
-                    # logging.error(e)
-                    pass
-                try:
-                    predictionData = asyncio.run(self.dataClient.getLocalStreamData(self.pubSubMapping[k]['publicationUuid']))
-                    if predictionData.status == DataServerApi.statusSuccess.value and isinstance(predictionData.data, pd.DataFrame):
-                        predictionDataDf = predictionData.data.tail(100)
-                    else:
-                        raise Exception(predictionData.senderMsg)
-                except Exception as e:
-                    # logging.error(e)
-                    pass
-
-                self.data[k] = {
-                    'realData': realDataDf.tail(100) if realDataDf is not None else pd.DataFrame([]),
-                    'predictionData': predictionDataDf.tail(100) if predictionDataDf is not None else pd.DataFrame([])
-                }
-                if ((realDataDf is not None and not realDataDf.empty) or
-                (predictionDataDf is not None and not predictionDataDf.empty)):
-                    self.updateStreamDisplay(self.findMatchingPubSubStream(k).streamId)
+    # TODO: Commented out for engine-neuron integration - data handled by Engine
+    # def populateData(self):
+    #     """ save real and prediction data in neuron """
+    #     for k in self.pubSubMapping.keys():
+    #         if k != 'transferProtocol' and k != 'transferProtocolPayload' and k != 'transferProtocolKey':
+    #             realDataDf = None
+    #             predictionDataDf = None
+    #             try:
+    #                 realData = asyncio.run(self.dataClient.getLocalStreamData(k))
+    #                 if realData.status == DataServerApi.statusSuccess.value and isinstance(realData.data, pd.DataFrame):
+    #                     realDataDf = realData.data.tail(100)
+    #                 else:
+    #                     raise Exception(realData.senderMsg)
+    #             except Exception as e:
+    #                 # logging.error(e)
+    #                 pass
+    #             try:
+    #                 predictionData = asyncio.run(self.dataClient.getLocalStreamData(self.pubSubMapping[k]['publicationUuid']))
+    #                 if predictionData.status == DataServerApi.statusSuccess.value and isinstance(predictionData.data, pd.DataFrame):
+    #                     predictionDataDf = predictionData.data.tail(100)
+    #                 else:
+    #                     raise Exception(predictionData.senderMsg)
+    #             except Exception as e:
+    #                 # logging.error(e)
+    #                 pass
+    #
+    #             self.data[k] = {
+    #                 'realData': realDataDf.tail(100) if realDataDf is not None else pd.DataFrame([]),
+    #                 'predictionData': predictionDataDf.tail(100) if predictionDataDf is not None else pd.DataFrame([])
+    #             }
+    #             if ((realDataDf is not None and not realDataDf.empty) or
+    #             (predictionDataDf is not None and not predictionDataDf.empty)):
+    #                 self.updateStreamDisplay(self.findMatchingPubSubStream(k).streamId)
 
     @staticmethod
     def predictionStreams(streams: list[Stream]):
@@ -710,61 +720,93 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if self.aiengine is not None:
             self.aiengine.addStream(stream, publication)
 
-
-    def centrifugoConnect(self):
-        self.centrifugoPayload = self.server.getCentrifugoToken()
-        self.centrifugoToken = self.centrifugoPayload.get('token')
-        if self.centrifugoToken is None:
-            logging.error("Failed to get centrifugo token")
+    def spawnEngine(self):
+        """Spawn the AI Engine with stream assignments from Neuron"""
+        if not self.subscriptions or not self.publications:
+            logging.warning("No stream assignments available, skipping Engine spawn")
             return
-        # Token will be passed to Engine via transferProtocolPayload
-        # Neuron only publishes, Engine subscribes
 
-    @property
-    def isConnectedToServer(self):
-        if hasattr(self, 'dataClient') and self.dataClient is not None:
-            return self.dataClient.isConnected()
-        return False
+        logging.info("Spawning AI Engine...", color="blue")
+        try:
+            # Create Engine using factory method
+            self.aiengine = Engine.createFromNeuron(
+                subscriptions=self.subscriptions,
+                publications=self.publications,
+                server=self.server,
+                wallet=self.wallet)
 
-    def connectToDataServer(self):
-        ''' connect to server, retry if failed '''
-
-        def authenticate() -> bool:
-            response = asyncio.run(self.dataClient.authenticate(islocal='neuron'))
-            if response.status == DataServerApi.statusSuccess.value:
-                logging.info("Local Neuron successfully connected to Server Ip at :", self.dataServerIp, color="green")
-                return True
-            return False
-
-        def initiateServerConnection() -> bool:
-            ''' local neuron client authorization '''
-            self.dataClient = DataClient(self.dataServerIp, self.dataServerPort, identity=self.identity)
-            return authenticate()
-
-        waitingPeriod = 10
-        while not self.isConnectedToServer:
-            try:
-                self.dataServerIp = config.get().get('server ip', '0.0.0.0')
-                self.dataServerPort = int(config.get().get('server port', 24600))
-                if initiateServerConnection():
-                    return True
-            except Exception as e:
-                # logging.error("Error connecting to server ip in config : ", e)
+            # Initialize and start the engine in a background thread
+            def runEngine():
                 try:
-                    self.dataServerIp = self.server.getPublicIp().text.split()[-1]
-                    if initiateServerConnection():
-                        return True
+                    self.aiengine.initializeFromNeuron()
+                    # Keep thread alive
+                    while True:
+                        time.sleep(60)
                 except Exception as e:
-                    logging.warning(f'Failed to find a valid Server Ip, retrying in {waitingPeriod}')
-                    time.sleep(waitingPeriod)
+                    logging.error(f"Engine error: {e}")
 
-    def stayConnectedForever(self):
-        ''' runs in a thread to maintain connection '''
-        while True:
-            time.sleep(30)
-            if not self.isConnectedToServer:
-                self.connectToDataServer()
-                self.dataServerFinalize()
+            engineThread = threading.Thread(target=runEngine, daemon=True)
+            engineThread.start()
+            logging.info("AI Engine spawned successfully", color="green")
+        except Exception as e:
+            logging.error(f"Failed to spawn AI Engine: {e}")
+
+    # TODO: Commented out for engine-neuron integration
+    # def centrifugoConnect(self):
+    #     self.centrifugoPayload = self.server.getCentrifugoToken()
+    #     self.centrifugoToken = self.centrifugoPayload.get('token')
+    #     if self.centrifugoToken is None:
+    #         logging.error("Failed to get centrifugo token")
+    #         return
+    #     # Token will be passed to Engine via transferProtocolPayload
+    #     # Neuron only publishes, Engine subscribes
+
+    # TODO: Commented out for engine-neuron integration - data handled by Engine
+    # @property
+    # def isConnectedToServer(self):
+    #     if hasattr(self, 'dataClient') and self.dataClient is not None:
+    #         return self.dataClient.isConnected()
+    #     return False
+    #
+    # def connectToDataServer(self):
+    #     ''' connect to server, retry if failed '''
+    #
+    #     def authenticate() -> bool:
+    #         response = asyncio.run(self.dataClient.authenticate(islocal='neuron'))
+    #         if response.status == DataServerApi.statusSuccess.value:
+    #             logging.info("Local Neuron successfully connected to Server Ip at :", self.dataServerIp, color="green")
+    #             return True
+    #         return False
+    #
+    #     def initiateServerConnection() -> bool:
+    #         ''' local neuron client authorization '''
+    #         self.dataClient = DataClient(self.dataServerIp, self.dataServerPort, identity=self.identity)
+    #         return authenticate()
+    #
+    #     waitingPeriod = 10
+    #     while not self.isConnectedToServer:
+    #         try:
+    #             self.dataServerIp = config.get().get('server ip', '0.0.0.0')
+    #             self.dataServerPort = int(config.get().get('server port', 24600))
+    #             if initiateServerConnection():
+    #                 return True
+    #         except Exception as e:
+    #             # logging.error("Error connecting to server ip in config : ", e)
+    #             try:
+    #                 self.dataServerIp = self.server.getPublicIp().text.split()[-1]
+    #                 if initiateServerConnection():
+    #                     return True
+    #             except Exception as e:
+    #                 logging.warning(f'Failed to find a valid Server Ip, retrying in {waitingPeriod}')
+    #                 time.sleep(waitingPeriod)
+    #
+    # def stayConnectedForever(self):
+    #     ''' runs in a thread to maintain connection '''
+    #     while True:
+    #         time.sleep(30)
+    #         if not self.isConnectedToServer:
+    #             self.connectToDataServer()
+    #             self.dataServerFinalize()
 
     def determineTransferProtocol(self, ipAddr: str, port: int = 24600) -> str:
         '''
@@ -849,201 +891,197 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return "0.0.0.0"
 
 
-    def sharePubSubInfo(self):
-        ''' set Pub-Sub mapping in the authorized server '''
-        def matchPubSub():
-            ''' matchs related pub/sub stream '''
-            streamPairs = StreamPairs(
-                self.subscriptions,
-                StartupDag.predictionStreams(self.publications))
-            subscriptions, publications = streamPairs.get_matched_pairs()
-            # this is the one that's called (todo: refactor other paths out)
-            self.streamDisplay = [
-                self.streamDisplayer(subscription, publication)
-                for subscription, publication in zip(subscriptions, publications)]
-            predictionStreamsToPredict = config.get().get('prediction stream', None)
-            if predictionStreamsToPredict is not None:
-                streamsLen = int(predictionStreamsToPredict)
-                logging.info(f"Length of Streams reduced from {len(subscriptions)} to {streamsLen}")
-            else:
-                streamsLen = len(subscriptions)
-            subList = [sub.streamId.uuid for sub in subscriptions[:streamsLen]]
-            pubList = [pub.streamId.uuid for pub in publications[:streamsLen]]
-            pubListAll = [pub.streamId.uuid for pub in self.publications]
-            _, fellowSubscribers = self.server.getStreamsSubscribers(subList)
-            success, mySubscribers = self.server.getStreamsSubscribers(pubListAll)
-            _, remotePublishers = self.server.getStreamsPublishers(subList)
-            _, meAsPublisher = self.server.getStreamsPublishers(pubList)
-            _, hostInfo = self.server.getStreamsPublishers(pubListAll)
+    # TODO: Commented out for engine-neuron integration - data handled by Engine
+    # def sharePubSubInfo(self):
+    #     ''' set Pub-Sub mapping in the authorized server '''
+    #     def matchPubSub():
+    #         ''' matchs related pub/sub stream '''
+    #         streamPairs = StreamPairs(
+    #             self.subscriptions,
+    #             StartupDag.predictionStreams(self.publications))
+    #         subscriptions, publications = streamPairs.get_matched_pairs()
+    #         # this is the one that's called (todo: refactor other paths out)
+    #         self.streamDisplay = [
+    #             self.streamDisplayer(subscription, publication)
+    #             for subscription, publication in zip(subscriptions, publications)]
+    #         predictionStreamsToPredict = config.get().get('prediction stream', None)
+    #         if predictionStreamsToPredict is not None:
+    #             streamsLen = int(predictionStreamsToPredict)
+    #             logging.info(f"Length of Streams reduced from {len(subscriptions)} to {streamsLen}")
+    #         else:
+    #             streamsLen = len(subscriptions)
+    #         subList = [sub.streamId.uuid for sub in subscriptions[:streamsLen]]
+    #         pubList = [pub.streamId.uuid for pub in publications[:streamsLen]]
+    #         pubListAll = [pub.streamId.uuid for pub in self.publications]
+    #         _, fellowSubscribers = self.server.getStreamsSubscribers(subList)
+    #         success, mySubscribers = self.server.getStreamsSubscribers(pubListAll)
+    #         _, remotePublishers = self.server.getStreamsPublishers(subList)
+    #         _, meAsPublisher = self.server.getStreamsPublishers(pubList)
+    #         _, hostInfo = self.server.getStreamsPublishers(pubListAll)
+    #
+    #         # removing duplicates ( same ip and port )
+    #         for data in [fellowSubscribers, mySubscribers, remotePublishers, meAsPublisher]:
+    #             for key in data:
+    #                 seen = set()
+    #                 data[key] = [x for x in data[key] if not (x in seen or seen.add(x))]
+    #
+    #         hostIpAndPort = next((value for value in hostInfo.values() if value), [])
+    #
+    #         # Handle empty `hostInfo` or hostIpAndPort is not known case
+    #         if not hostInfo or not hostIpAndPort:
+    #             logging.warning("Host Info is empty. Using default Pro-active protocol.")
+    #             self.transferProtocol = 'p2p-proactive-pubsub'
+    #         else:
+    #             logging.debug('Host Ip And Port', hostIpAndPort, print=True)
+    #             hostIp = hostIpAndPort[0].split(':')[0]
+    #             for k, v in remotePublishers.items():
+    #                 publisherIp = v[0].split(':')[0]
+    #                 if publisherIp == hostIp:
+    #                     uuidOfMatchedIp = k
+    #                     portOfMatchedIp = v[0].split(':')[1]
+    #                     internalNatIp = self.determineInternalNatIp()
+    #                     publisherToBeAppended = internalNatIp + ':' + portOfMatchedIp
+    #                     for k, v in fellowSubscribers.items():
+    #                         if k == uuidOfMatchedIp:
+    #                             logging.debug("Appended remotePublisher Ip with Port:", publisherToBeAppended, print=True)
+    #                             v.append(publisherToBeAppended)
+    #             self.transferProtocol = self.determineTransferProtocol(
+    #                 hostIp, self.dataServerPort)
+    #             logging.debug('transferProtocol', self.transferProtocol, print=True)
+    #
+    #         subInfo = {
+    #             uuid: {
+    #                 'subscribers': fellowSubscribers.get(uuid, []),
+    #                 'publishers': remotePublishers.get(uuid, [])}
+    #             for uuid in subList
+    #         }
+    #         pubInfo = {
+    #             uuid: {
+    #                 'subscribers': mySubscribers.get(uuid, []),
+    #                 'publishers': meAsPublisher.get(uuid, [])}
+    #             for uuid in pubList
+    #         }
+    #
+    #         self.pubSubMapping = {
+    #             sub_uuid: {
+    #                 'publicationUuid': pub_uuid,
+    #                 'supportiveUuid': [],
+    #                 'dataStreamSubscribers': subInfo[sub_uuid]['subscribers'],
+    #                 'dataStreamPublishers': subInfo[sub_uuid]['publishers'],
+    #                 'predictiveStreamSubscribers': pubInfo[pub_uuid]['subscribers'],
+    #                 'predictiveStreamPublishers': pubInfo[pub_uuid]['publishers']
+    #             }
+    #             for sub_uuid, pub_uuid in zip(subInfo.keys(), pubInfo.keys())
+    #         }
+    #         self.pubSubMapping['transferProtocol'] = self.transferProtocol
+    #
+    #         centrifugoData = None
+    #         if self.centrifugoPayload:
+    #             centrifugoData = {
+    #                 'centrifugo': {
+    #                     'token': self.centrifugoPayload.get('token'),
+    #                     'ws_url': self.centrifugoPayload.get('ws_url'),
+    #                     'expires_at': self.centrifugoPayload.get('expires_at'),
+    #                     'user_id': self.centrifugoPayload.get('user_id')
+    #                 }
+    #             }
+    #
+    #         if self.transferProtocol == 'p2p-proactive-pubsub':
+    #             self.pubSubMapping['transferProtocolPayload'] = {
+    #                 **(mySubscribers if success else {}),
+    #                 **(centrifugoData or {})
+    #             }
+    #             self.pubSubMapping['transferProtocolKey'] = self.key
+    #         elif self.transferProtocol == 'p2p-pubsub':
+    #             self.pubSubMapping['transferProtocolKey'] = self.key
+    #             self.pubSubMapping['transferProtocolPayload'] = centrifugoData
+    #         else:
+    #             self.pubSubMapping['transferProtocolPayload'] = centrifugoData
+    #
+    #     def _sendPubSubMapping():
+    #         """ send pub-sub mapping with peer informations to the DataServer """
+    #         try:
+    #             response = asyncio.run(self.dataClient.setPubsubMap(self.pubSubMapping))
+    #             if response.status == DataServerApi.statusSuccess.value:
+    #                 logging.debug(response.senderMsg, print=True)
+    #             else:
+    #                 raise Exception(response.senderMsg)
+    #         except Exception as e:
+    #             logging.error(f"Failed to set pub-sub mapping, {e}")
+    #
+    #     matchPubSub()
+    #     _sendPubSubMapping()
 
-            # removing duplicates ( same ip and port )
-            for data in [fellowSubscribers, mySubscribers, remotePublishers, meAsPublisher]:
-                for key in data:
-                    seen = set()
-                    data[key] = [x for x in data[key] if not (x in seen or seen.add(x))]
-
-            # logging.debug("My Subscribers", mySubscribers, print=True)
-            # logging.debug("hostInfo", hostInfo, print=True)
-            # logging.debug("remotePublishers", remotePublishers, print=True)
-
-            hostIpAndPort = next((value for value in hostInfo.values() if value), [])
-
-            # Handle empty `hostInfo` or hostIpAndPort is not known case
-            if not hostInfo or not hostIpAndPort:
-                logging.warning("Host Info is empty. Using default Pro-active protocol.")
-                self.transferProtocol = 'p2p-proactive-pubsub' # a good usecase for 'pubsub'?
-            else:
-                logging.debug('Host Ip And Port', hostIpAndPort, print=True)
-                hostIp = hostIpAndPort[0].split(':')[0]
-                for k, v in remotePublishers.items():
-                    publisherIp = v[0].split(':')[0]
-                    if publisherIp == hostIp:
-                        uuidOfMatchedIp = k
-                        portOfMatchedIp = v[0].split(':')[1]
-                        internalNatIp = self.determineInternalNatIp()
-                        publisherToBeAppended = internalNatIp + ':' + portOfMatchedIp
-                        for k, v in fellowSubscribers.items():
-                            # Appending the internal NAT ip if remotePublisher has same ip as of the host
-                            if k == uuidOfMatchedIp:
-                                logging.debug("Appended remotePublisher Ip with Port:", publisherToBeAppended, print=True)
-                                v.append(publisherToBeAppended)
-                self.transferProtocol = self.determineTransferProtocol(
-                    hostIp, self.dataServerPort)
-                logging.debug('transferProtocol', self.transferProtocol, print=True)
-                    
-            subInfo = {
-                uuid: {
-                    'subscribers': fellowSubscribers.get(uuid, []),
-                    'publishers': remotePublishers.get(uuid, [])}
-                for uuid in subList
-            }
-            pubInfo = {
-                uuid: {
-                    'subscribers': mySubscribers.get(uuid, []),
-                    'publishers': meAsPublisher.get(uuid, [])}
-                for uuid in pubList
-            }
-
-            self.pubSubMapping = {
-                sub_uuid: {
-                    'publicationUuid': pub_uuid,
-                    'supportiveUuid': [],
-                    'dataStreamSubscribers': subInfo[sub_uuid]['subscribers'],
-                    'dataStreamPublishers': subInfo[sub_uuid]['publishers'],
-                    'predictiveStreamSubscribers': pubInfo[pub_uuid]['subscribers'],
-                    'predictiveStreamPublishers': pubInfo[pub_uuid]['publishers']
-                }
-                for sub_uuid, pub_uuid in zip(subInfo.keys(), pubInfo.keys())
-            }
-            self.pubSubMapping['transferProtocol'] = self.transferProtocol
-
-            # Include Centrifugo token for all transfer protocols if available
-            centrifugoData = None
-            if self.centrifugoPayload:
-                centrifugoData = {
-                    'centrifugo': {
-                        'token': self.centrifugoPayload.get('token'),
-                        'ws_url': self.centrifugoPayload.get('ws_url'),
-                        'expires_at': self.centrifugoPayload.get('expires_at'),
-                        'user_id': self.centrifugoPayload.get('user_id')
-                    }
-                }
-
-            if self.transferProtocol == 'p2p-proactive-pubsub': # p2p-proactive-pubsub
-                self.pubSubMapping['transferProtocolPayload'] = {
-                    **(mySubscribers if success else {}),
-                    **(centrifugoData or {})
-                }
-                self.pubSubMapping['transferProtocolKey'] = self.key
-            elif self.transferProtocol == 'p2p-pubsub':
-                self.pubSubMapping['transferProtocolKey'] = self.key
-                self.pubSubMapping['transferProtocolPayload'] = centrifugoData
-            else:
-                self.pubSubMapping['transferProtocolPayload'] = centrifugoData
-
-        def _sendPubSubMapping():
-            """ send pub-sub mapping with peer informations to the DataServer """
-            try:
-                response = asyncio.run(self.dataClient.setPubsubMap(self.pubSubMapping))
-                if response.status == DataServerApi.statusSuccess.value:
-                    logging.debug(response.senderMsg, print=True)
-                else:
-                    raise Exception(response.senderMsg)
-            except Exception as e:
-                logging.error(f"Failed to set pub-sub mapping, {e}")
-
-        matchPubSub()
-        _sendPubSubMapping()
-
-    def subscribeToRawData(self):
-        ''' local neuron client subscribes to engine predication data '''
-
-        for k in self.pubSubMapping.keys():
-            if k != 'transferProtocol' and k != 'transferProtocolPayload' and k != 'transferProtocolKey':
-                response = asyncio.run(self.dataClient.subscribe(
-                    uuid=k,
-                    callback=self.handleRawData))
-                if response.status == DataServerApi.statusSuccess.value:
-                    logging.debug('Subscribed to Raw Data', response.senderMsg)
-                else:
-                    logging.warning('Failed to Subscribe: ', response.senderMsg)
-
-    def subscribeToEngineUpdates(self):
-        ''' local neuron client subscribes to engine predication data '''
-
-        for k, v in self.pubSubMapping.items():
-            if k != 'transferProtocol' and k != 'transferProtocolPayload' and k != 'transferProtocolKey':
-                response = asyncio.run(self.dataClient.subscribe(
-                    uuid=v['publicationUuid'],
-                    callback=self.handlePredictionData))
-                if response.status == DataServerApi.statusSuccess.value:
-                    logging.debug('Subscribed to Prediction Data', response.senderMsg)
-                else:
-                    logging.warning('Failed to Subscribe: ', response.senderMsg)
-
-    def handleRawData(self, subscription: Subscription, message: Message):
-
-        if message.status != DataClientApi.streamInactive.value:
-            logging.info('Raw Data Subscribtion Message', message.to_dict(True), color='green')
-            updated_data = pd.concat([
-                self.data[message.uuid]['realData'],
-                message.data
-            ])
-            self.data[message.uuid]['realData'] = updated_data.tail(100)
-            self.latestObservationTime = time.time()
-        else:
-            logging.warning('Raw Data Subscribtion Message', message.to_dict(True))
-
-    def handlePredictionData(self, subscription: Subscription, message: Message):
-
-        def findMatchingSubUuid(pubUuid) -> str:
-            for key in self.pubSubMapping.keys():
-                if pubUuid == self.pubSubMapping.get(key, {}).get('publicationUuid'):
-                    return key
-
-        if message.status != DataClientApi.streamInactive.value:
-            logging.info('Prediction Data Subscribtion Message', message.to_dict(True), color='green')
-            matchedSubUuid = findMatchingSubUuid(message.uuid)
-            matchedPubStream = self.findMatchingPubSubStream(message.uuid, False)
-            matchedSubStream = self.findMatchingPubSubStream(matchedSubUuid)
-
-            if not message.replace:  # message.replace is False if its prediction on cadence
-                self.server.publish(
-                    topic=matchedPubStream.streamId.jsonId,
-                    data=str(message.data['value'].iloc[0]),
-                    observationTime=str(message.data.index[0]),
-                    observationHash=str(message.data['hash'].iloc[0]),
-                    isPrediction=True,
-                    useAuthorizedCall=self.version >= Version("0.2.6"))
-
-            updatedPredictionData = pd.concat([
-                self.data[matchedSubUuid]['predictionData'],
-                message.data
-            ])
-            self.data[matchedSubUuid]['predictionData'] = updatedPredictionData.tail(100)
-            self.updateStreamDisplay(matchedSubStream.streamId)
-        else:
-            logging.warning('Prediction Data Subscribtion Message', message.to_dict(True))
+    # TODO: Commented out for engine-neuron integration - data handled by Engine
+    # def subscribeToRawData(self):
+    #     ''' local neuron client subscribes to engine predication data '''
+    #
+    #     for k in self.pubSubMapping.keys():
+    #         if k != 'transferProtocol' and k != 'transferProtocolPayload' and k != 'transferProtocolKey':
+    #             response = asyncio.run(self.dataClient.subscribe(
+    #                 uuid=k,
+    #                 callback=self.handleRawData))
+    #             if response.status == DataServerApi.statusSuccess.value:
+    #                 logging.debug('Subscribed to Raw Data', response.senderMsg)
+    #             else:
+    #                 logging.warning('Failed to Subscribe: ', response.senderMsg)
+    #
+    # def subscribeToEngineUpdates(self):
+    #     ''' local neuron client subscribes to engine predication data '''
+    #
+    #     for k, v in self.pubSubMapping.items():
+    #         if k != 'transferProtocol' and k != 'transferProtocolPayload' and k != 'transferProtocolKey':
+    #             response = asyncio.run(self.dataClient.subscribe(
+    #                 uuid=v['publicationUuid'],
+    #                 callback=self.handlePredictionData))
+    #             if response.status == DataServerApi.statusSuccess.value:
+    #                 logging.debug('Subscribed to Prediction Data', response.senderMsg)
+    #             else:
+    #                 logging.warning('Failed to Subscribe: ', response.senderMsg)
+    #
+    # def handleRawData(self, subscription: Subscription, message: Message):
+    #
+    #     if message.status != DataClientApi.streamInactive.value:
+    #         logging.info('Raw Data Subscribtion Message', message.to_dict(True), color='green')
+    #         updated_data = pd.concat([
+    #             self.data[message.uuid]['realData'],
+    #             message.data
+    #         ])
+    #         self.data[message.uuid]['realData'] = updated_data.tail(100)
+    #         self.latestObservationTime = time.time()
+    #     else:
+    #         logging.warning('Raw Data Subscribtion Message', message.to_dict(True))
+    #
+    # def handlePredictionData(self, subscription: Subscription, message: Message):
+    #
+    #     def findMatchingSubUuid(pubUuid) -> str:
+    #         for key in self.pubSubMapping.keys():
+    #             if pubUuid == self.pubSubMapping.get(key, {}).get('publicationUuid'):
+    #                 return key
+    #
+    #     if message.status != DataClientApi.streamInactive.value:
+    #         logging.info('Prediction Data Subscribtion Message', message.to_dict(True), color='green')
+    #         matchedSubUuid = findMatchingSubUuid(message.uuid)
+    #         matchedPubStream = self.findMatchingPubSubStream(message.uuid, False)
+    #         matchedSubStream = self.findMatchingPubSubStream(matchedSubUuid)
+    #
+    #         if not message.replace:  # message.replace is False if its prediction on cadence
+    #             self.server.publish(
+    #                 topic=matchedPubStream.streamId.jsonId,
+    #                 data=str(message.data['value'].iloc[0]),
+    #                 observationTime=str(message.data.index[0]),
+    #                 observationHash=str(message.data['hash'].iloc[0]),
+    #                 isPrediction=True,
+    #                 useAuthorizedCall=self.version >= Version("0.2.6"))
+    #
+    #         updatedPredictionData = pd.concat([
+    #             self.data[matchedSubUuid]['predictionData'],
+    #             message.data
+    #         ])
+    #         self.data[matchedSubUuid]['predictionData'] = updatedPredictionData.tail(100)
+    #         self.updateStreamDisplay(matchedSubStream.streamId)
+    #     else:
+    #         logging.warning('Prediction Data Subscribtion Message', message.to_dict(True))
 
     def findMatchingPubSubStream(self, uuid: str, sub: bool = True) -> Stream:
             if sub:
@@ -1179,65 +1217,66 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # if latestTag.isNew:
             #    self.triggerRestart()
 
-    def publish(
-        self,
-        topic: str,
-        data: str,
-        observationTime: str,
-        observationHash: str,
-        toCentral: bool = False,
-        isPrediction: bool = False,
-    ) -> True:
-        """publishes to all the pubsub servers"""
-        
-        # publishing to centrifugo REST API
-        if self.centrifugoToken and not isPrediction:
-            try:
-                streamId = StreamId.fromTopic(topic)
-                if streamId.uuid:
-                    # Format data to include all fields - ensure all values are serializable
-                    centrifugo_data = {
-                        'value': str(data),
-                        'time': observationTime,
-                        'hash': str(observationHash)
-                    }
-                    response = publish_to_stream_rest(
-                        stream_uuid=streamId.uuid,
-                        data=centrifugo_data,
-                        token=self.centrifugoToken
-                    )
-                    if response.status_code != 200:
-                        logging.warning(f"Centrifugo publish failed: {response.status_code}")
-                        raise Exception
-                    else:
-                        logging.info(f"Centrifugo publish successful: {response.status_code}")
-            except Exception as e:
-                toCentral = True
-                logging.error(f"Error publishing to Centrifugo: {e}")
-
-        # publishing to centrifugo WEBSOCKET (todo: move websocket connection to Engine, and use rest api for publishing here.)
-        #if self.centrifugo is not None and hasattr(self, 'centrifugoSubscriptions'):
-        #    # TODO: we need to figure public to the correct stream according to this topic (by uuid ideally)
-        #    streamId = StreamId.fromTopic(topic)
-        #    # Find the subscription for this stream
-        #    for subscription in self.centrifugoSubscriptions:
-        #        if subscription.channel == f"streams:{streamId.uuid}":
-        #            # Publish your predictions
-        #            # run in background, don't wait
-        #            asyncio.create_task(subscription.publish(data))
-        #            break
-        #    # alternatively, we could use the `asyncio.run(subscription.publish(data))`
-        #    # alternatively, we could make publish an async function and call this with `await subscription.publish(data)`
-
-        if toCentral:
-            isSuccess = self.server.publish(
-                topic=topic,
-                data=data,
-                observationTime=observationTime,
-                observationHash=observationHash,
-                isPrediction=isPrediction,
-                useAuthorizedCall=self.version >= Version("0.2.6"))
-            logging.info(f"publish directly to Central : {isSuccess}")
+    # TODO: Commented out for engine-neuron integration - Engine publishes directly to Central
+    # def publish(
+    #     self,
+    #     topic: str,
+    #     data: str,
+    #     observationTime: str,
+    #     observationHash: str,
+    #     toCentral: bool = False,
+    #     isPrediction: bool = False,
+    # ) -> True:
+    #     """publishes to all the pubsub servers"""
+    #
+    #     # publishing to centrifugo REST API
+    #     if self.centrifugoToken and not isPrediction:
+    #         try:
+    #             streamId = StreamId.fromTopic(topic)
+    #             if streamId.uuid:
+    #                 # Format data to include all fields - ensure all values are serializable
+    #                 centrifugo_data = {
+    #                     'value': str(data),
+    #                     'time': observationTime,
+    #                     'hash': str(observationHash)
+    #                 }
+    #                 response = publish_to_stream_rest(
+    #                     stream_uuid=streamId.uuid,
+    #                     data=centrifugo_data,
+    #                     token=self.centrifugoToken
+    #                 )
+    #                 if response.status_code != 200:
+    #                     logging.warning(f"Centrifugo publish failed: {response.status_code}")
+    #                     raise Exception
+    #                 else:
+    #                     logging.info(f"Centrifugo publish successful: {response.status_code}")
+    #         except Exception as e:
+    #             toCentral = True
+    #             logging.error(f"Error publishing to Centrifugo: {e}")
+    #
+    #     # publishing to centrifugo WEBSOCKET (todo: move websocket connection to Engine, and use rest api for publishing here.)
+    #     #if self.centrifugo is not None and hasattr(self, 'centrifugoSubscriptions'):
+    #     #    # TODO: we need to figure public to the correct stream according to this topic (by uuid ideally)
+    #     #    streamId = StreamId.fromTopic(topic)
+    #     #    # Find the subscription for this stream
+    #     #    for subscription in self.centrifugoSubscriptions:
+    #     #        if subscription.channel == f"streams:{streamId.uuid}":
+    #     #            # Publish your predictions
+    #     #            # run in background, don't wait
+    #     #            asyncio.create_task(subscription.publish(data))
+    #     #            break
+    #     #    # alternatively, we could use the `asyncio.run(subscription.publish(data))`
+    #     #    # alternatively, we could make publish an async function and call this with `await subscription.publish(data)`
+    #
+    #     if toCentral:
+    #         isSuccess = self.server.publish(
+    #             topic=topic,
+    #             data=data,
+    #             observationTime=observationTime,
+    #             observationHash=observationHash,
+    #             isPrediction=isPrediction,
+    #             useAuthorizedCall=self.version >= Version("0.2.6"))
+    #         logging.info(f"publish directly to Central : {isSuccess}")
 
     def performStakeCheck(self):
         self.stakeStatus = self.server.stakeCheck()

@@ -16,6 +16,7 @@ RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron
 # Copy satori-lite code
 COPY lib-lite /Satori/Lib
 COPY neuron-lite /Satori/Neuron
+COPY engine-lite /Satori/Engine
 
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
