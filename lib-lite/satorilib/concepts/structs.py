@@ -704,7 +704,7 @@ class Observation:
         else:
             j = raw
         observationTime = j.get(
-            "time", dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
+            "time", dt.datetime.now(dt.UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
         )
         observationHash = j.get("observationHash", j.get("hash", None))
         content = j.get("content", {})
