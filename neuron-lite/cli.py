@@ -194,11 +194,65 @@ class NeuronCLI:
         self.runMode = runMode
         self.startup = None
         self.neuron_started = False
+        self._vault_password_set = False
 
     def add_log(self, message: str):
         """Add a log message to buffer."""
         timestamp = time.strftime("%H:%M:%S")
         _log_buffer.append(f"[{timestamp}] {message}")
+
+    def check_vault_password_exists(self) -> bool:
+        """Check if vault password exists in config."""
+        from satorineuron import config
+        vault_password = config.get().get('vault password')
+        return vault_password is not None and len(str(vault_password)) > 0
+
+    def prompt_mandatory_vault_password(self) -> bool:
+        """Prompt user to create a vault password. Returns True if successful."""
+        console_print()
+        console_print("=" * 60)
+        console_print("  VAULT PASSWORD SETUP REQUIRED")
+        console_print("=" * 60)
+        console_print()
+        console_print("A vault password is required to secure your wallet.")
+        console_print("This password encrypts your private keys and funds.")
+        console_print()
+        console_print("IMPORTANT: Save this password in a secure location!")
+        console_print("If you lose this password, you will lose access to your vault.")
+        console_print("There is no way to recover a lost vault password.")
+        console_print()
+        console_print("=" * 60)
+        console_print()
+
+        while True:
+            console_write("Enter new vault password (min 4 characters): ")
+            password1 = console_readline().strip()
+
+            if len(password1) < 4:
+                console_print("Password must be at least 4 characters. Please try again.")
+                console_print()
+                continue
+
+            console_write("Confirm password: ")
+            password2 = console_readline().strip()
+
+            if password1 != password2:
+                console_print("Passwords do not match. Please try again.")
+                console_print()
+                continue
+
+            # Save password to config
+            from satorineuron import config
+            config.add(data={'vault password': password1})
+            self._vault_password_set = True
+
+            console_print()
+            console_print("Vault password saved successfully!")
+            console_print()
+            console_print("REMINDER: Please save your password securely!")
+            console_print("         You will need it to access your vault.")
+            console_print()
+            return True
 
     def start_neuron_background(self):
         """Start the neuron in a background thread."""
@@ -433,6 +487,12 @@ class NeuronCLI:
         """Run interactive CLI loop."""
         console_print("Satori Neuron CLI. Type /help for commands, /exit to quit.")
         console_print()
+
+        # Check if vault password exists, if not, prompt for mandatory creation
+        if not self.check_vault_password_exists():
+            if not self.prompt_mandatory_vault_password():
+                console_print("Vault password is required. Exiting.")
+                return
 
         # Start neuron in background
         self.start_neuron_background()
