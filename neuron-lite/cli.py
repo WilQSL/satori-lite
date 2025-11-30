@@ -226,7 +226,7 @@ class NeuronCLI:
 
         if user_input == "/help":
             return """Available commands:
-  /neuron-logs   - Show neuron logs
+  /logs          - View logs sub-menu
   /status        - Show current status
   /balance       - Show wallet balance
   /streams       - Show stream assignments
@@ -242,15 +242,37 @@ class NeuronCLI:
   /help          - Show this help message
   /exit          - Exit CLI (neuron keeps running)"""
 
-        elif user_input == "/neuron-logs":
+        elif user_input == "/logs":
+            return """Logs sub-menu:
+  /logs neuron   - Show neuron logs
+  /logs engine   - Show engine logs"""
+
+        elif user_input == "/logs neuron":
             logs = _log_buffer[-50:]
             if not logs:
                 return "No logs yet."
             return "\n".join(logs)
 
+        elif user_input == "/logs engine":
+            # Filter logs for engine-related messages
+            engine_keywords = [
+                'engine', 'Engine', 'adapter', 'Adapter', 'prediction',
+                'Prediction', 'StreamModel', 'stream model', 'forecast',
+                'XgbAdapter', 'StarterAdapter', 'XgbChronosAdapter',
+                'model training', 'inference', 'Engine DB'
+            ]
+            engine_logs = [
+                log for log in _log_buffer
+                if any(keyword in log for keyword in engine_keywords)
+            ]
+            logs = engine_logs[-50:]
+            if not logs:
+                return "No engine logs yet."
+            return "\n".join(logs)
+
         elif user_input == "/status":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             status_lines = [
                 f"Mode: {self.startup.runMode.name}",
                 f"Paused: {self.startup.paused}",
@@ -264,7 +286,7 @@ class NeuronCLI:
 
         elif user_input == "/balance":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             balance_lines = [
                 f"Holding Balance: {self.startup.holdingBalance}",
                 f"Server Balance: {self.startup.getBalance('currency')}",
@@ -276,7 +298,7 @@ class NeuronCLI:
 
         elif user_input == "/streams":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             lines = [f"Subscriptions: {len(self.startup.subscriptions)}"]
             for s in self.startup.subscriptions[:5]:
                 lines.append(f"  - {s.streamId.source}/{s.streamId.stream}")
@@ -291,35 +313,35 @@ class NeuronCLI:
 
         elif user_input == "/pause":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             self.startup.pause()
             return "Engine paused"
 
         elif user_input == "/unpause":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             self.startup.unpause()
             return "Engine unpaused"
 
         elif user_input == "/restart":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             self.startup.triggerRestart()
 
         elif user_input == "/stake":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             status = self.startup.performStakeCheck()
             return f"Stake Status: {status}\nStake Required: {self.startup.stakeRequired}"
 
         elif user_input == "/pool":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             return f"Pool Accepting: {self.startup.poolIsAccepting}"
 
         elif user_input == "/vault-status":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             vault = self.startup.vault
             if vault is None:
                 return "Vault: Not created\nUse /vault-create to create a new vault."
@@ -331,14 +353,14 @@ class NeuronCLI:
 
         elif user_input == "/vault-create":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             if self.startup.vault is not None:
                 return "Vault already exists. Use /vault-open to unlock it."
             return "VAULT_CREATE_PROMPT"
 
         elif user_input == "/vault-open":
             if not self.neuron_started:
-                return "Neuron is starting... Use /neuron-logs to see progress."
+                return "Neuron is starting... Use /logs neuron to see progress."
             vault = self.startup.vault
             if vault is None:
                 return "No vault exists. Use /vault-create to create one first."
