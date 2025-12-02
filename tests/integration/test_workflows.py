@@ -25,8 +25,22 @@ def test_complete_authentication_flow(server_url, server_available, test_wallet)
     assert challenge is not None
     assert len(challenge) > 0
 
-    # Step 2: Create auth headers (wallet signs challenge)
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge)
+    # Step 2: Sign challenge with real wallet
+    signature = test_wallet.sign(challenge)
+
+    # Signature from wallet.sign() is already base64-encoded as bytes
+    if isinstance(signature, bytes):
+        signature_str = signature.decode('utf-8')
+    else:
+        signature_str = signature
+
+    # Create headers with proper HTTP header names
+    headers = {
+        'wallet-pubkey': test_wallet.pubkey,
+        'message': challenge,
+        'signature': signature_str
+    }
+
     assert "wallet-pubkey" in headers
     assert "message" in headers
     assert "signature" in headers
@@ -38,12 +52,11 @@ def test_complete_authentication_flow(server_url, server_available, test_wallet)
         headers=headers
     )
 
-    # With mock wallet, signature will fail (401)
-    # But this tests the complete flow works
-    assert response.status_code == 401  # Auth failure expected with mock wallet
+    # With real wallet, signature should be VALID (not 401)
+    # We expect 200 (has balance) or 404 (peer not found - new wallet not registered)
+    assert response.status_code in [200, 404], f"Expected 200 or 404, got {response.status_code}"
 
-    # Important: endpoint was reached and authentication was checked
-    assert response.status_code != 404  # Not a routing error
+    # Important: no server errors
     assert response.status_code != 500  # Not a server error
 
 
@@ -238,7 +251,18 @@ def test_error_recovery_malformed_json(server_url, server_available, challenge_t
     2. Verify error response
     3. Server remains stable
     """
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    # Sign challenge with real wallet
+    signature = test_wallet.sign(challenge_token)
+    if isinstance(signature, bytes):
+        signature_str = signature.decode('utf-8')
+    else:
+        signature_str = signature
+
+    headers = {
+        'wallet-pubkey': test_wallet.pubkey,
+        'message': challenge_token,
+        'signature': signature_str
+    }
 
     # Send malformed JSON (missing required fields)
     response = requests.post(

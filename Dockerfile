@@ -18,11 +18,13 @@ COPY lib-lite /Satori/Lib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web
+COPY tests /Satori/tests
 
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /Satori/requirements.txt
+    pip install --no-cache-dir -r /Satori/requirements.txt && \
+    pip install pytest
 
 # Set Python path - include /Satori so 'from web.app' imports work
 ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"

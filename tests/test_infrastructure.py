@@ -1,7 +1,7 @@
 """
 Test infrastructure smoke tests.
 
-Verifies that the test setup is working correctly.
+Verifies that the test setup is working correctly with REAL implementations.
 """
 import pytest
 
@@ -18,17 +18,66 @@ def test_fixtures_available(test_wallet, test_server_url, client_instance):
     assert client_instance is not None
 
 
+def test_wallet_fixture_is_real(test_wallet):
+    """Verify test wallet is a REAL EvrmoreIdentity, not a mock."""
+    from satorilib.wallet.evrmore.identity import EvrmoreIdentity
+    assert isinstance(test_wallet, EvrmoreIdentity), "test_wallet should be a real EvrmoreIdentity"
+
+
 def test_wallet_fixture_structure(test_wallet):
     """Verify test wallet has required attributes."""
-    assert hasattr(test_wallet, 'publicKey')
+    # Real wallet class exposes 'pubkey', NOT 'publicKey'
+    assert hasattr(test_wallet, 'pubkey')
     assert hasattr(test_wallet, 'address')
     assert hasattr(test_wallet, 'sign')
     assert hasattr(test_wallet, 'verify')
     assert hasattr(test_wallet, 'authPayload')
 
-    # Verify publicKey format (66 chars, hex, starts with 02 or 03)
-    assert len(test_wallet.publicKey) == 66
-    assert test_wallet.publicKey.startswith(('02', '03'))
+    # Verify pubkey format (66 chars, hex, starts with 02 or 03)
+    assert len(test_wallet.pubkey) == 66, f"pubkey should be 66 chars, got {len(test_wallet.pubkey)}"
+    assert test_wallet.pubkey.startswith(('02', '03')), f"pubkey should start with 02 or 03, got {test_wallet.pubkey[:2]}"
+
+    # Verify it's valid hex
+    try:
+        bytes.fromhex(test_wallet.pubkey)
+    except ValueError:
+        pytest.fail(f"pubkey should be valid hex: {test_wallet.pubkey}")
+
+
+def test_wallet_can_sign(test_wallet):
+    """Verify the wallet can actually sign messages."""
+    message = "test message to sign"
+    signature = test_wallet.sign(message)
+
+    # Signature should be bytes
+    assert isinstance(signature, bytes), f"signature should be bytes, got {type(signature)}"
+    assert len(signature) > 0, "signature should not be empty"
+
+
+def test_wallet_can_verify_own_signature(test_wallet):
+    """Verify the wallet can verify its own signatures."""
+    message = "test message to verify"
+    signature = test_wallet.sign(message)
+
+    # Should verify its own signature
+    is_valid = test_wallet.verify(message, signature)
+    assert is_valid, "wallet should verify its own signature"
+
+
+def test_wallet_auth_payload(test_wallet):
+    """Verify authPayload generates correct structure."""
+    challenge = "test-challenge-uuid"
+    payload = test_wallet.authPayload(asDict=True, challenge=challenge)
+
+    assert isinstance(payload, dict), "authPayload should return dict when asDict=True"
+    # NOTE: Real wallet authPayload returns 'pubkey', not 'wallet-pubkey'
+    # The HTTP header mapping happens in the client code
+    assert 'pubkey' in payload, "payload should have pubkey"
+    assert 'message' in payload, "payload should have message"
+    assert 'signature' in payload, "payload should have signature"
+
+    # Verify the pubkey matches
+    assert payload['pubkey'] == test_wallet.pubkey
 
 
 def test_client_instance_fixture(client_instance):

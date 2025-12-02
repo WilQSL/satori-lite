@@ -471,7 +471,7 @@
             const data = await response.json();
             const indicator = document.getElementById('statusIndicator');
             const text = document.getElementById('statusText');
-            if (data.status === 'ok') {
+            if (data.api === 'connected') {
                 indicator.className = 'status-indicator status-online';
                 text.textContent = 'Connected';
             } else {

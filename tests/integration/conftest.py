@@ -71,10 +71,22 @@ def authenticated_headers(test_wallet, challenge_token):
     Returns:
         dict: Headers with wallet-pubkey, message, and signature
     """
-    # Get auth payload from wallet
-    auth_payload = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    # Sign the challenge directly using wallet.sign()
+    # This matches the approach used in test_real_wallet_signature_is_valid
+    signature = test_wallet.sign(challenge_token)
 
-    return auth_payload
+    # Signature from wallet.sign() is already base64-encoded as bytes
+    # Just decode to string - do NOT base64 encode again
+    if isinstance(signature, bytes):
+        signature_str = signature.decode('utf-8')
+    else:
+        signature_str = signature
+
+    return {
+        'wallet-pubkey': test_wallet.pubkey,
+        'message': challenge_token,
+        'signature': signature_str
+    }
 
 
 @pytest.fixture

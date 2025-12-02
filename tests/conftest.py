@@ -1,12 +1,13 @@
 """
 Shared pytest fixtures for satori-lite tests.
 
-Provides common fixtures for unit and integration tests.
+Uses REAL wallet implementations - NO mocking.
 """
 import os
 import sys
+import tempfile
 import pytest
-from unittest.mock import MagicMock, Mock
+import requests
 from pathlib import Path
 
 # Add satori-lite lib-lite to Python path
@@ -20,73 +21,63 @@ def test_server_url():
     """
     URL for the test server.
 
-    Returns the server URL from environment or defaults to localhost:8000.
-    Integration tests should set this to a running server instance.
+    Returns the server URL from environment or defaults to the Docker network URL.
     """
-    return os.environ.get("SATORI_SERVER_URL", "http://localhost:8000")
+    return os.environ.get("SATORI_SERVER_URL", "http://satori-api:8000")
 
 
 @pytest.fixture
-def test_wallet():
-    """
-    Create a test wallet for authentication.
+def server_available(test_server_url):
+    """Check if the test server is available."""
+    try:
+        response = requests.get(f"{test_server_url}/health", timeout=5)
+        if response.status_code == 200:
+            return True
+    except requests.RequestException:
+        pass
+    pytest.skip(f"Server not available at {test_server_url}")
 
-    For integration tests, this creates a real wallet that can sign messages.
-    For unit tests, this can be mocked.
+
+@pytest.fixture
+def test_wallet(tmp_path):
+    """
+    Create a REAL test wallet for authentication.
+
+    Uses EvrmoreIdentity to create a real wallet that can sign messages.
+    The wallet is created in a temporary directory and cleaned up after tests.
 
     Returns:
-        Mock wallet with required attributes for testing:
-        - address: Test wallet address
-        - publicKey: Test public key (66 char compressed hex)
-        - privkey: Test private key
-        - sign(): Method to sign messages
-        - verify(): Method to verify signatures
-        - authPayload(): Method to create auth payload
+        EvrmoreIdentity: Real wallet with all authentication capabilities
     """
-    # Create a mock wallet with realistic test data
-    wallet = MagicMock()
+    from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 
-    # Use a valid compressed Evrmore public key format (66 chars, starts with 02 or 03)
-    wallet.publicKey = "026a2a2bee6d2d1b4db0fb60c20a60a3bcfee53ef911d3e20ce0ebc079006558c2"
-    wallet.address = "ETestAddress123456789ABCDEFGHIJK"
-    wallet.privkey = "test_private_key_for_testing"
-
-    # Mock sign method to return a valid signature
-    def mock_sign(message: str) -> bytes:
-        return f"signature_of_{message}".encode()
-
-    wallet.sign = Mock(side_effect=mock_sign)
-
-    # Mock verify method
-    wallet.verify = Mock(return_value=True)
-
-    # Mock authPayload method to match real wallet behavior
-    def mock_auth_payload(asDict=False, challenge=None):
-        payload = {
-            "wallet-pubkey": wallet.publicKey,
-            "message": challenge or "test_message",
-            "signature": "test_signature"
-        }
-        if asDict:
-            return payload
-        return payload
-
-    wallet.authPayload = Mock(side_effect=mock_auth_payload)
+    # Create wallet in temp directory (auto-generates entropy if file doesn't exist)
+    wallet_path = str(tmp_path / "test_wallet.yaml")
+    wallet = EvrmoreIdentity(walletPath=wallet_path)
 
     return wallet
 
 
 @pytest.fixture
+def challenge_token(test_server_url, server_available):
+    """Get a real challenge token from the server."""
+    response = requests.get(f"{test_server_url}/api/v1/auth/challenge", timeout=10)
+    if response.status_code == 200:
+        return response.json().get("challenge")
+    pytest.skip("Could not get challenge token from server")
+
+
+@pytest.fixture
 def client_instance(test_wallet, test_server_url):
     """
-    Create a SatoriServerClient instance for testing.
+    Create a REAL SatoriServerClient instance for testing.
 
     Args:
-        test_wallet: Test wallet fixture
+        test_wallet: Real EvrmoreIdentity wallet fixture
         test_server_url: Server URL fixture
 
     Returns:
-        SatoriServerClient configured with test wallet and server URL
+        SatoriServerClient configured with real wallet and server URL
     """
     from satorilib.server.server import SatoriServerClient
 
@@ -99,38 +90,39 @@ def client_instance(test_wallet, test_server_url):
 
 
 @pytest.fixture
-def mock_requests():
+def authenticated_headers(test_wallet, challenge_token):
     """
-    Mock for requests library to use in unit tests.
+    Create real authenticated headers for API requests.
 
-    Returns:
-        Mock requests module with get, post, delete methods
+    Uses the real wallet to sign a challenge and create valid auth headers.
     """
-    requests_mock = MagicMock()
+    # Sign the challenge directly using wallet.sign()
+    # This matches the approach used in test_real_wallet_signature_is_valid
+    signature = test_wallet.sign(challenge_token)
 
-    # Mock response object
-    response_mock = MagicMock()
-    response_mock.status_code = 200
-    response_mock.text = '{"status": "ok"}'
-    response_mock.json.return_value = {"status": "ok"}
+    # Signature from wallet.sign() is already base64-encoded as bytes
+    # Just decode to string - do NOT base64 encode again
+    if isinstance(signature, bytes):
+        signature_str = signature.decode('utf-8')
+    else:
+        signature_str = signature
 
-    # Mock HTTP methods
-    requests_mock.get.return_value = response_mock
-    requests_mock.post.return_value = response_mock
-    requests_mock.delete.return_value = response_mock
-    requests_mock.put.return_value = response_mock
-
-    return requests_mock
+    return {
+        'wallet-pubkey': test_wallet.pubkey,
+        'message': challenge_token,
+        'signature': signature_str
+    }
 
 
 @pytest.fixture
 def mock_response():
     """
-    Create a mock HTTP response for unit tests.
+    Create a mock HTTP response for unit tests that specifically need mocking.
 
-    Returns:
-        Mock response object with common attributes
+    Note: Prefer using real server responses in integration tests.
     """
+    from unittest.mock import MagicMock, Mock
+
     response = MagicMock()
     response.status_code = 200
     response.text = '{"message": "success"}'
@@ -150,11 +142,14 @@ def mock_response():
 def pytest_configure(config):
     """Configure custom pytest markers."""
     config.addinivalue_line(
-        "markers", "unit: Unit tests with mocked dependencies"
+        "markers", "unit: Unit tests (may use minimal mocking for isolation)"
     )
     config.addinivalue_line(
         "markers", "integration: Integration tests requiring running server"
     )
     config.addinivalue_line(
         "markers", "slow: Tests that take significant time to run"
+    )
+    config.addinivalue_line(
+        "markers", "auth: Authentication-related tests"
     )

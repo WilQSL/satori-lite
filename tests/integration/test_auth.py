@@ -1,17 +1,18 @@
 """
 Integration tests for authentication flow.
 
-Tests the challenge-response authentication mechanism with the actual server.
+Tests the challenge-response authentication mechanism with REAL wallets and server.
 """
 import pytest
 import requests
+import base64
 
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_get_challenge_token(server_url, server_available):
+def test_get_challenge_token(test_server_url, server_available):
     """Test getting a challenge token from the server."""
-    response = requests.get(f"{server_url}/api/v1/auth/challenge")
+    response = requests.get(f"{test_server_url}/api/v1/auth/challenge")
 
     assert response.status_code == 200
     data = response.json()
@@ -22,10 +23,10 @@ def test_get_challenge_token(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_challenge_token_is_unique(server_url, server_available):
+def test_challenge_token_is_unique(test_server_url, server_available):
     """Test that each challenge request returns a unique token."""
-    response1 = requests.get(f"{server_url}/api/v1/auth/challenge")
-    response2 = requests.get(f"{server_url}/api/v1/auth/challenge")
+    response1 = requests.get(f"{test_server_url}/api/v1/auth/challenge")
+    response2 = requests.get(f"{test_server_url}/api/v1/auth/challenge")
 
     assert response1.status_code == 200
     assert response2.status_code == 200
@@ -39,9 +40,9 @@ def test_challenge_token_is_unique(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_challenge_token_format(server_url, server_available):
+def test_challenge_token_format(test_server_url, server_available):
     """Test challenge token is in UUID format."""
-    response = requests.get(f"{server_url}/api/v1/auth/challenge")
+    response = requests.get(f"{test_server_url}/api/v1/auth/challenge")
 
     assert response.status_code == 200
     challenge = response.json()["challenge"]
@@ -69,32 +70,62 @@ def test_client_can_get_challenge(client_instance, server_available):
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_authenticated_call_with_mock_wallet(server_url, server_available, test_wallet):
-    """Test authenticated call with test wallet (will fail auth but tests flow)."""
-    # Get challenge
-    challenge_response = requests.get(f"{server_url}/api/v1/auth/challenge")
-    challenge = challenge_response.json()["challenge"]
-
-    # Create auth headers
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge)
-
-    # Try authenticated endpoint (will fail because mock wallet signature invalid)
+def test_authenticated_call_with_real_wallet(test_server_url, server_available, authenticated_headers):
+    """Test authenticated call with REAL wallet using valid signature."""
+    # Make an authenticated request to a protected endpoint
     response = requests.get(
-        f"{server_url}/api/v1/balance/get",
-        headers=headers
+        f"{test_server_url}/api/v1/balance/get",
+        headers=authenticated_headers
     )
 
-    # Should get 401 because signature is invalid (expected for mock wallet)
-    # This tests that the authentication flow is being checked
-    assert response.status_code == 401
+    # With a real wallet and valid signature, should either:
+    # - 200: Peer exists and has balance
+    # - 404: Peer not found (new wallet, not registered)
+    # Should NOT get 401 (invalid signature) with a real wallet
+    assert response.status_code in [200, 404], f"Expected 200 or 404, got {response.status_code}: {response.text}"
 
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_missing_auth_headers_rejected(server_url, server_available):
+def test_real_wallet_signature_is_valid(test_server_url, server_available, test_wallet):
+    """Test that a real wallet produces a valid signature that the server accepts."""
+    # Get a fresh challenge
+    challenge_response = requests.get(f"{test_server_url}/api/v1/auth/challenge")
+    assert challenge_response.status_code == 200
+    challenge = challenge_response.json()["challenge"]
+
+    # Sign with real wallet
+    signature = test_wallet.sign(challenge)
+
+    # Signature from wallet.sign() is already base64-encoded as bytes
+    # Just decode to string - do NOT base64 encode again
+    if isinstance(signature, bytes):
+        signature_str = signature.decode('utf-8')
+    else:
+        signature_str = signature
+
+    headers = {
+        "wallet-pubkey": test_wallet.pubkey,
+        "message": challenge,
+        "signature": signature_str
+    }
+
+    # Try to access an authenticated endpoint
+    response = requests.get(
+        f"{test_server_url}/api/v1/balance/get",
+        headers=headers
+    )
+
+    # Should NOT get 401 - signature should be valid
+    assert response.status_code != 401, f"Signature validation failed: {response.text}"
+
+
+@pytest.mark.integration
+@pytest.mark.auth
+def test_missing_auth_headers_rejected(test_server_url, server_available):
     """Test that requests without auth headers are rejected."""
     # Try to access authenticated endpoint without headers
-    response = requests.get(f"{server_url}/api/v1/balance/get")
+    response = requests.get(f"{test_server_url}/api/v1/balance/get")
 
     # Should get 422 or 401 (missing required headers)
     assert response.status_code in [401, 422]
@@ -102,7 +133,7 @@ def test_missing_auth_headers_rejected(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_invalid_pubkey_format_rejected(server_url, server_available, challenge_token):
+def test_invalid_pubkey_format_rejected(test_server_url, server_available, challenge_token):
     """Test that invalid public key format is rejected."""
     headers = {
         "wallet-pubkey": "invalid_pubkey",  # Invalid format
@@ -111,10 +142,59 @@ def test_invalid_pubkey_format_rejected(server_url, server_available, challenge_
     }
 
     response = requests.post(
-        f"{server_url}/api/v1/prediction/post",
+        f"{test_server_url}/api/v1/prediction/post",
         headers=headers,
         json={"value": "100.0"}
     )
 
     # Should reject invalid pubkey format
     assert response.status_code in [400, 401]
+
+
+@pytest.mark.integration
+@pytest.mark.auth
+def test_invalid_signature_rejected(test_server_url, server_available, test_wallet, challenge_token):
+    """Test that invalid signatures are rejected."""
+    headers = {
+        "wallet-pubkey": test_wallet.pubkey,  # Valid pubkey
+        "message": challenge_token,
+        "signature": "invalid_signature_not_base64"  # Invalid signature
+    }
+
+    response = requests.get(
+        f"{test_server_url}/api/v1/balance/get",
+        headers=headers
+    )
+
+    # Should reject invalid signature
+    assert response.status_code == 401
+
+
+@pytest.mark.integration
+@pytest.mark.auth
+def test_wrong_message_signature_rejected(test_server_url, server_available, test_wallet, challenge_token):
+    """Test that signature for wrong message is rejected."""
+    # Sign a DIFFERENT message than the challenge
+    wrong_message = "wrong_message"
+    signature = test_wallet.sign(wrong_message)
+
+    # Signature from wallet.sign() is already base64-encoded as bytes
+    # Just decode to string - do NOT base64 encode again
+    if isinstance(signature, bytes):
+        signature_str = signature.decode('utf-8')
+    else:
+        signature_str = signature
+
+    headers = {
+        "wallet-pubkey": test_wallet.pubkey,
+        "message": challenge_token,  # This is the challenge
+        "signature": signature_str   # But signature is for different message
+    }
+
+    response = requests.get(
+        f"{test_server_url}/api/v1/balance/get",
+        headers=headers
+    )
+
+    # Should reject - signature doesn't match message
+    assert response.status_code == 401

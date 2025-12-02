@@ -7,6 +7,9 @@ Handles all web routes for the minimal UI:
 - API proxy endpoints
 """
 from functools import wraps
+import time
+import logging
+import base64
 import requests
 from flask import (
     render_template,
@@ -18,6 +21,8 @@ from flask import (
     jsonify,
     current_app
 )
+
+logger = logging.getLogger(__name__)
 
 # Global vault reference (will be set by the application)
 _vault = None
@@ -32,6 +37,85 @@ def set_vault(vault):
 def get_vault():
     """Get the vault instance."""
     return _vault
+
+
+def ensure_peer_registered(app, wallet_manager, max_retries=3):
+    """Ensure the peer is registered with the API server.
+
+    This function should be called after vault is successfully unlocked.
+    It will:
+    1. Try to login (check if peer exists)
+    2. If not found, register the peer
+    3. Retry with delay if registration fails
+
+    Args:
+        app: Flask app instance for config access
+        wallet_manager: The wallet manager instance with wallet and vault
+        max_retries: Maximum number of retry attempts
+
+    Returns:
+        dict with peer info if successful, None if failed
+    """
+    api_url = app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+
+    # Get wallet pubkey (identity)
+    wallet_pubkey = None
+    if wallet_manager.wallet and hasattr(wallet_manager.wallet, 'pubkey'):
+        wallet_pubkey = wallet_manager.wallet.pubkey
+
+    # Get vault pubkey
+    vault_pubkey = None
+    if wallet_manager.vault and hasattr(wallet_manager.vault, 'pubkey'):
+        vault_pubkey = wallet_manager.vault.pubkey
+
+    if not wallet_pubkey:
+        logger.warning("No wallet pubkey available for peer registration")
+        return None
+
+    for attempt in range(max_retries):
+        try:
+            # Step 1: Try login first
+            headers = {'wallet-pubkey': wallet_pubkey}
+            resp = requests.get(
+                f"{api_url}/api/v1/peer/login",
+                headers=headers,
+                timeout=10
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('exists'):
+                    logger.info(f"Peer already registered: peer_id={data.get('peer_id')}")
+                    return data
+
+            # Step 2: Peer not found, register
+            headers = {'wallet-pubkey': wallet_pubkey}
+            if vault_pubkey:
+                headers['vault-pubkey'] = vault_pubkey
+
+            resp = requests.post(
+                f"{api_url}/api/v1/peer/register",
+                headers=headers,
+                timeout=10
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('success'):
+                    logger.info(f"Peer registered: peer_id={data.get('peer_id')}")
+                    return data
+
+            logger.warning(f"Peer registration attempt {attempt + 1} failed: {resp.text}")
+
+        except requests.RequestException as e:
+            logger.warning(f"Peer registration attempt {attempt + 1} error: {e}")
+
+        # Wait before retry (except on last attempt)
+        if attempt < max_retries - 1:
+            time.sleep(5)
+
+    logger.error("Failed to register peer after all retries")
+    return None
 
 
 def login_required(f):
@@ -76,6 +160,18 @@ def register_routes(app):
                     else:
                         # Successfully decrypted
                         session['vault_open'] = True
+
+                        # Register peer with API server (non-blocking)
+                        try:
+                            peer_info = ensure_peer_registered(
+                                current_app, wallet_manager, max_retries=1)
+                            if peer_info:
+                                session['peer_id'] = peer_info.get('peer_id')
+                                logger.info(f"Peer registered: {peer_info}")
+                        except Exception as e:
+                            # Don't block login if registration fails
+                            logger.warning(f"Peer registration warning: {e}")
+
                         return redirect(url_for('dashboard'))
                 except Exception as e:
                     flash(f'Error: Invalid password or vault error', 'error')
@@ -109,22 +205,85 @@ def register_routes(app):
 
     @app.route('/health')
     def health():
-        """Health check endpoint."""
-        return jsonify({'status': 'ok'})
+        """Health check endpoint - checks API server connectivity."""
+        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        try:
+            resp = requests.get(f"{api_url}/health", timeout=5)
+            if resp.status_code == 200:
+                return jsonify({'status': 'ok', 'api': 'connected'})
+        except requests.RequestException:
+            pass
+        return jsonify({'status': 'ok', 'api': 'disconnected'})
 
     # API Proxy Routes
-    def proxy_api(endpoint, method='GET', data=None):
+    def get_auth_headers():
+        """Get authentication headers for API requests.
+
+        This implements the challenge-response flow:
+        1. Get a challenge token from the API
+        2. Sign it with the identity wallet
+        3. Return headers with pubkey, message, and signature
+        """
+        wallet_manager = get_vault()
+        if not wallet_manager or not wallet_manager.wallet:
+            return None
+
+        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+
+        try:
+            # Step 1: Get challenge
+            resp = requests.get(f"{api_url}/api/v1/auth/challenge", timeout=10)
+            if resp.status_code != 200:
+                logger.warning(f"Failed to get challenge: {resp.text}")
+                return None
+
+            challenge = resp.json().get('challenge')
+            if not challenge:
+                return None
+
+            # Step 2: Get wallet pubkey and sign the challenge
+            wallet = wallet_manager.wallet
+            if not hasattr(wallet, 'pubkey') or not hasattr(wallet, 'sign'):
+                logger.warning("Wallet missing pubkey or sign method")
+                return None
+
+            signature = wallet.sign(message=challenge)
+
+            # Convert binary signature to base64 string for HTTP header
+            if isinstance(signature, bytes):
+                signature = base64.b64encode(signature).decode('utf-8')
+
+            # Step 3: Return auth headers
+            return {
+                'wallet-pubkey': wallet.pubkey,
+                'message': challenge,
+                'signature': signature
+            }
+        except Exception as e:
+            logger.warning(f"Auth header generation failed: {e}")
+            return None
+
+    def proxy_api(endpoint, method='GET', data=None, authenticated=True):
         """Proxy requests to the Satori API server."""
         api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
         url = f"{api_url}/api/v1{endpoint}"
 
+        # Get auth headers for authenticated requests
+        headers = {}
+        if authenticated:
+            auth_headers = get_auth_headers()
+            if auth_headers:
+                headers.update(auth_headers)
+            else:
+                logger.warning(f"No auth headers available for {endpoint}")
+
         try:
             if method == 'GET':
-                resp = requests.get(url, timeout=10)
+                resp = requests.get(url, headers=headers, timeout=10)
             elif method == 'POST':
-                resp = requests.post(url, json=data, timeout=10)
+                resp = requests.post(url, json=data, headers=headers, timeout=10)
             elif method == 'DELETE':
-                resp = requests.delete(url, json=data, timeout=10)
+                resp = requests.delete(url, json=data, headers=headers, timeout=10)
             else:
                 return jsonify({'error': 'Invalid method'}), 400
 

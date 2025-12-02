@@ -65,8 +65,9 @@ def test_get_challenge_fallback_on_missing_challenge_field(client_instance, mock
 def test_make_authenticated_call_headers_generation(client_instance, mock_response, test_wallet):
     """Test _makeAuthenticatedCall() generates correct authentication headers."""
     challenge = "test-challenge-123"
+    # NOTE: Real wallet class exposes 'pubkey', NOT 'publicKey'
     expected_auth_payload = {
-        "wallet-pubkey": test_wallet.publicKey,
+        "wallet-pubkey": test_wallet.pubkey,
         "message": challenge,
         "signature": "test_signature"
     }
