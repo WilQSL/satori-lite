@@ -1,0 +1,40 @@
+version: '3.8'
+
+# Local development docker-compose override for satori-lite
+# Usage: docker-compose -f ../docker-compose.yml -f docker-compose.local.yml up
+
+services:
+  # Satori-Lite Web UI + Neuron
+  satori-lite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: satori-lite
+    environment:
+      # Connect to the API server
+      SATORI_API_URL: http://satori-api:8000
+      # Wallet/vault paths inside container
+      WALLET_PATH: /data/wallet.yaml
+      VAULT_PATH: /data/vault.yaml
+      # Flask config
+      SECRET_KEY: local-dev-secret-key-change-in-production
+      WEB_PORT: 5000
+    volumes:
+      # Persist wallet data
+      - ./data:/data
+      # Mount code for live reload (optional, remove for production-like)
+      # - ./web:/Satori/web
+      # - ./neuron-lite:/Satori/Neuron
+    ports:
+      - "5000:5000"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - default
+    command: python /Satori/Neuron/start.py
+
+networks:
+  default:
+    name: app_default
+    external: true
