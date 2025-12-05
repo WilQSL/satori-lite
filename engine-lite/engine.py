@@ -536,6 +536,11 @@ class StreamModel:
             self.data = pd.concat([self.data, engineDf], ignore_index=True)
             self.data = self.data.drop_duplicates(subset=['date_time'], keep='last')
 
+            # Trigger prediction when new observation arrives
+            if insertedRows > 0:
+                info(f"New observation received, triggering prediction for stream {self.streamUuid}", color='blue')
+                self.producePrediction()
+
         except Exception as e:
             error(f"Error storing received data: {e}")  
 
@@ -1013,7 +1018,6 @@ class StreamModel:
                         if self.pilot.save(self.modelPath()):
                             self.stable = copy.deepcopy(self.pilot)
                             info("stable model updated for stream:", self.streamUuid)
-                            self.producePrediction(self.stable)
                 else:
                     debug(f'model training failed on {self.streamUuid} waiting 10 minutes to retry')
                     self.failedAdapters.append(self.pilot)
