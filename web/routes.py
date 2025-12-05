@@ -88,11 +88,10 @@ def get_or_create_session_vault():
 
                 # Create NEW WalletManager instance for this session
                 logger.info(f"Creating new WalletManager for session: {session_id}")
-                _session_vaults[session_id] = WalletManager(
-                    wallet=config.walletPath('wallet.yaml'),
-                    vault=config.walletPath('vault.yaml'),
-                    cachePath=config.cachePath(),
-                    temporary=False  # Don't persist changes from web UI
+                _session_vaults[session_id] = WalletManager.create(
+                    walletPath=config.walletPath('wallet.yaml'),
+                    vaultPath=config.walletPath('vault.yaml')
+                    # cachePath is optional and defaults to None
                 )
             except Exception as e:
                 logger.error(f"Failed to create session vault: {e}")
