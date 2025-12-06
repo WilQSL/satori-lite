@@ -149,8 +149,8 @@
                         <i class="material-icons align-middle me-2">account_balance_wallet</i>
                         Balance
                     </h5>
-                    <button class="btn btn-primary btn-sm" onclick="refreshBalance()">
-                        <i class="material-icons align-middle">refresh</i>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance()">
+                        <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
                     </button>
                 </div>
                 <div class="card-body">
@@ -326,13 +326,30 @@
         try {
             const options = {
                 method: method,
-                headers: { 'Content-Type': 'application/json' }
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             };
             if (data) {
                 options.body = JSON.stringify(data);
             }
             const response = await fetch(API_URL + endpoint, options);
-            return await response.json();
+
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}`);
+            }
+
+            const result = await response.json();
+
+            // Check for HTTP errors
+            if (!response.ok) {
+                throw new Error(result.detail || result.error || `HTTP ${response.status}`);
+            }
+
+            return result;
         } catch (error) {
             console.error('API Error:', error);
             showToast('API Error: ' + error.message, true);
