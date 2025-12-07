@@ -312,6 +312,7 @@
     // State tracking for mutual exclusion
     let isStakingToPool = false;
     let isOpenPool = false;  // True if pool has commission > 0 (accepting lenders)
+    let hasWorkers = false;  // True if user has workers (active pool)
 
     function showToast(message, isError = false) {
         const toast = document.getElementById('statusToast');
@@ -359,8 +360,9 @@
 
     // Update UI based on mutual exclusion rules
     function updateMutualExclusionUI() {
-        const poolStakingReason = 'You cannot stake to a pool while you are an open pool';
-        const poolManagementReason = 'You cannot manage workers while staking to another pool';
+        const poolStakingReasonCommission = 'You cannot stake to a pool while you have commission set (open pool)';
+        const poolStakingReasonWorkers = 'You cannot stake to a pool while you have workers (active pool)';
+        const poolManagementReason = 'You cannot manage workers or commission while staking to another pool';
 
         // Pool Staking elements
         const poolAddressInput = document.getElementById('poolAddress');
@@ -377,14 +379,15 @@
         const addWorkerBtn = document.getElementById('addWorkerBtn');
         const addWorkerWrapper = document.getElementById('addWorkerWrapper');
 
-        // If you're an open pool (have commission set), disable Pool Staking
-        if (isOpenPool) {
+        // If you're an open pool (have commission set) OR have workers, disable Pool Staking
+        if (isOpenPool || hasWorkers) {
+            const reason = isOpenPool ? poolStakingReasonCommission : poolStakingReasonWorkers;
             poolAddressInput.disabled = true;
-            poolAddressWrapper.setAttribute('title', poolStakingReason);
+            poolAddressWrapper.setAttribute('title', reason);
             addStakeBtn.disabled = true;
-            addStakeBtnWrapper.setAttribute('title', poolStakingReason);
+            addStakeBtnWrapper.setAttribute('title', reason);
             removeStakeBtn.disabled = true;
-            removeStakeBtnWrapper.setAttribute('title', poolStakingReason);
+            removeStakeBtnWrapper.setAttribute('title', reason);
         } else {
             poolAddressInput.disabled = false;
             poolAddressWrapper.setAttribute('title', '');
@@ -400,7 +403,7 @@
             }
         }
 
-        // If staking to pool, disable Pool Management
+        // If staking to pool, disable Pool Management (both commission AND workers)
         if (isStakingToPool) {
             poolCommission.disabled = true;
             poolCommissionWrapper.setAttribute('title', poolManagementReason);
@@ -611,12 +614,32 @@
     }
 
     async function loadWorkers() {
-        // TODO: Load workers from API when endpoint is available
-        // For now, check if there are workers based on workerList content
         const workerListEl = document.getElementById('workerList');
-        // This would be replaced with actual API call
-        // const result = await apiCall('/pool/workers');
-        // Update: workers list doesn't affect mutual exclusion, only isOpenPool does
+        const result = await apiCall('/pool/workers');
+
+        if (result && result.workers && result.workers.length > 0) {
+            hasWorkers = true;
+            workerListEl.innerHTML = '';
+            result.workers.forEach(worker => {
+                const workerItem = document.createElement('div');
+                workerItem.className = 'd-flex justify-content-between align-items-center mb-2 p-2 border rounded';
+                workerItem.innerHTML = `
+                    <div>
+                        <small class="text-muted">Address:</small><br>
+                        <code class="small">${worker.address}</code>
+                        ${worker.alias ? `<br><span class="badge bg-secondary">${worker.alias}</span>` : ''}
+                    </div>
+                    <button class="btn btn-sm btn-danger" onclick="removeWorker('${worker.address}')">
+                        <i class="material-icons align-middle" style="font-size: 16px;">delete</i>
+                    </button>
+                `;
+                workerListEl.appendChild(workerItem);
+            });
+        } else {
+            hasWorkers = false;
+            workerListEl.innerHTML = '<p class="text-muted">No workers</p>';
+        }
+
         updateMutualExclusionUI();
     }
 

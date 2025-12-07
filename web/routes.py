@@ -247,8 +247,15 @@ def login_required(f):
             session['session_id'] = str(uuid.uuid4())
             session.permanent = True
 
+        # Check if user is logged in via session flag
         if not session.get('vault_open'):
+            # Not logged in - check if vault file exists
+            if not check_vault_file_exists():
+                # No vault file - redirect to create password
+                return redirect(url_for('create_password'))
+            # Vault exists but not logged in - redirect to login
             return redirect(url_for('login'))
+
         return f(*args, **kwargs)
     return decorated_function
 
@@ -569,6 +576,12 @@ def register_routes(app):
     def api_pool_commission():
         """Get pool commission status."""
         return proxy_api('/pool/commission', 'GET')
+
+    @app.route('/api/pool/workers', methods=['GET'])
+    @login_required
+    def api_pool_workers():
+        """Get list of workers for authenticated user's pool."""
+        return proxy_api('/pool/workers', 'GET')
 
     @app.route('/api/wallet/address')
     @login_required
