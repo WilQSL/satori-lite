@@ -273,6 +273,47 @@ def register_routes(app):
         if not check_vault_password_exists():
             return redirect(url_for('vault_setup'))
 
+        # Auto-login on GET if config password exists
+        if request.method == 'GET':
+            from satorineuron import config
+            config_password = config.get().get('vault password')
+
+            if config_password:
+                # Attempt auto-login with config password
+                wallet_manager = get_or_create_session_vault()
+                if wallet_manager:
+                    try:
+                        vault = wallet_manager.openVault(password=config_password, create=True)
+
+                        if vault and vault.isDecrypted:
+                            # Successfully auto-logged in
+                            session['vault_open'] = True
+
+                            # Encrypt and store password in session for future use
+                            encrypted_pw, session_key = encrypt_vault_password(config_password)
+                            session['encrypted_vault_password'] = encrypted_pw
+                            session['session_key'] = session_key
+
+                            # Register peer with API server (non-blocking)
+                            try:
+                                peer_info = ensure_peer_registered(
+                                    current_app, wallet_manager, max_retries=1)
+                                if peer_info:
+                                    session['peer_id'] = peer_info.get('peer_id')
+                                    logger.info(f"Auto-login successful, peer registered: {peer_info}")
+                            except Exception as e:
+                                logger.warning(f"Auto-login peer registration warning: {e}")
+
+                            # Auto-login successful - redirect to dashboard
+                            logger.info("Auto-login successful with config password")
+                            return redirect(url_for('dashboard'))
+                    except Exception as e:
+                        logger.warning(f"Auto-login failed: {e}")
+                        # Fall through to show login form
+
+            # No config password or auto-login failed - show login form
+            return render_template('login.html')
+
         if request.method == 'POST':
             password = request.form.get('password', '')
 
@@ -345,25 +386,28 @@ def register_routes(app):
                 flash('Passwords do not match. Please try again.', 'error')
                 return render_template('vault_setup.html')
 
-            # Save password to config with double-check to prevent race condition
+            # Create vault with password (DO NOT save password to config for security)
             try:
-                from satorineuron import config
+                # Get session-specific wallet manager to create the vault
+                wallet_manager = get_or_create_session_vault()
 
-                # Double-check: verify password still doesn't exist before writing
-                # This prevents race condition where CLI/another instance creates it
-                # between our initial check and now
-                if check_vault_password_exists():
-                    flash('Vault password was already created. Please log in.', 'info')
-                    logger.info("Vault password already exists (created elsewhere), redirecting to login")
-                    return redirect(url_for('login'))
+                if wallet_manager:
+                    # Create the vault with the password
+                    vault = wallet_manager.openVault(password=password, create=True)
 
-                config.add(data={'vault password': password})
-                flash('Vault password created successfully! Please log in.', 'success')
-                logger.info("Vault password created via web UI")
-                return redirect(url_for('login'))
+                    if vault and vault.isDecrypted:
+                        flash('Vault created successfully! Please log in with your password.', 'success')
+                        logger.info("Vault created via web UI (password NOT saved to config)")
+                        return redirect(url_for('login'))
+                    else:
+                        flash('Error creating vault. Please try again.', 'error')
+                        return render_template('vault_setup.html')
+                else:
+                    flash('Error initializing wallet manager', 'error')
+                    return render_template('vault_setup.html')
             except Exception as e:
-                logger.error(f"Failed to save vault password: {e}")
-                flash('Error saving vault password. Please try again.', 'error')
+                logger.error(f"Failed to create vault: {e}")
+                flash(f'Error creating vault: {str(e)}', 'error')
                 return render_template('vault_setup.html')
 
         return render_template('vault_setup.html')
