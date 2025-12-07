@@ -498,7 +498,8 @@ def register_routes(app):
     @login_required
     def api_lender_lend():
         """Proxy lend request."""
-        return proxy_api('/lender/lend', request.method, request.json)
+        data = request.get_json(silent=True) if request.method == 'POST' else None
+        return proxy_api('/lender/lend', request.method, data)
 
     @app.route('/api/pool/worker', methods=['POST', 'DELETE'])
     @login_required
