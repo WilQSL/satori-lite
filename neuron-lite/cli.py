@@ -431,11 +431,32 @@ class NeuronCLI:
                 # Import here after log capture is set up
                 from start import StartupDag
                 self.add_log("Creating StartupDag...")
-                self.startup = StartupDag.create(
+                # Create instance without calling startFunction yet
+                startupDag = StartupDag(
                     env=self.env,
                     runMode=self.runMode)
-                self.neuron_started = True
+                # Assign to self.startup BEFORE the blocking call
+                self.startup = startupDag
+
+                # Unlock the vault with the password we got during CLI startup
+                if self._vault_password:
+                    if startupDag.walletManager:
+                        try:
+                            vault = startupDag.walletManager.openVault(password=self._vault_password)
+                            if vault and hasattr(vault, 'isDecrypted') and vault.isDecrypted:
+                                self.add_log("Vault unlocked successfully in StartupDag")
+                            else:
+                                self.add_log("Warning: Vault unlock failed - vault not decrypted")
+                        except Exception as e:
+                            self.add_log(f"Warning: Could not unlock vault in StartupDag: {e}")
+                    else:
+                        self.add_log("Warning: walletManager not available in StartupDag")
+                else:
+                    self.add_log("Warning: No vault password stored from CLI startup")
+
                 self.add_log("Neuron started successfully")
+                # Now call the blocking startFunction
+                startupDag.startFunction()
             except Exception as e:
                 self.add_log(f"Neuron startup error: {e}")
                 import traceback
@@ -550,6 +571,9 @@ class NeuronCLI:
         if not self.startup or not hasattr(self.startup, 'walletManager'):
             return "Neuron is starting... Use /logs neuron to see progress."
 
+        console_print("Fetching wallet balance...")
+        console_print()
+
         try:
             # Get wallet manager
             wallet_manager = self.startup.walletManager
@@ -558,9 +582,7 @@ class NeuronCLI:
 
             # Ensure ElectrumX connection
             if hasattr(wallet_manager, 'connect'):
-                connected = wallet_manager.connect()
-                if not connected:
-                    return "Error: Could not connect to ElectrumX servers.\nPlease check your network connection."
+                wallet_manager.connect()
 
             # Get wallet
             wallet = wallet_manager.wallet
@@ -599,6 +621,9 @@ class NeuronCLI:
         if not self.startup or not hasattr(self.startup, 'walletManager'):
             return "Neuron is starting... Use /logs neuron to see progress."
 
+        console_print("Fetching vault balance...")
+        console_print()
+
         try:
             # Get wallet manager
             wallet_manager = self.startup.walletManager
@@ -607,12 +632,14 @@ class NeuronCLI:
 
             # Ensure ElectrumX connection
             if hasattr(wallet_manager, 'connect'):
-                connected = wallet_manager.connect()
-                if not connected:
-                    return "Error: Could not connect to ElectrumX servers.\nPlease check your network connection."
+                wallet_manager.connect()
 
-            # Get vault
-            vault = wallet_manager.vault
+            # Re-open vault with stored password to ensure it's decrypted
+            if self._vault_password:
+                vault = wallet_manager.openVault(password=self._vault_password)
+            else:
+                vault = wallet_manager.vault
+
             if not vault:
                 return "Vault not available.\nPlease create or unlock your vault first."
 
@@ -749,9 +776,10 @@ System:
         elif user_input == "/balance":
             # Check if startup object exists and has wallet manager
             if not self.startup or not hasattr(self.startup, 'walletManager'):
-                return "Neuron is starting... Use /logs neuron to see progress."
+                return "Neuron is starting... Please wait a moment and try again."
 
             # Interactive menu for balance
+            # Both options always shown since vault is unlocked at CLI startup
             options = [
                 {'label': 'Wallet Balance', 'action': 'wallet'},
                 {'label': 'Vault Balance', 'action': 'vault'}
