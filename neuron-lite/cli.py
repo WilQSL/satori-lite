@@ -194,12 +194,21 @@ class NeuronCLI:
         self.runMode = runMode
         self.startup = None
         self.neuron_started = False
-        self._vault_password_set = False
+        self._vault_password = None  # Store password in memory for session
 
     def add_log(self, message: str):
         """Add a log message to buffer."""
         timestamp = time.strftime("%H:%M:%S")
         _log_buffer.append(f"[{timestamp}] {message}")
+
+    def check_vault_file_exists(self) -> bool:
+        """Check if vault.yaml file exists (like web UI does)."""
+        try:
+            from satorineuron import config
+            vault_path = config.walletPath('vault.yaml')
+            return os.path.exists(vault_path)
+        except Exception:
+            return False
 
     def check_vault_password_exists(self) -> bool:
         """Check if vault password exists in config."""
@@ -276,6 +285,144 @@ class NeuronCLI:
             console_print("         You will need it to access your vault.")
             console_print()
             return True
+
+    def prompt_vault_setup_or_unlock(self) -> bool:
+        """
+        Prompt user to either create new vault or unlock existing vault.
+        Returns True if successful, False otherwise.
+        This matches the web UI behavior - passwords are NOT saved to config.
+        """
+        from satorineuron import config
+
+        # Check if config password exists (backward compatibility)
+        config_password = config.get().get('vault password')
+
+        if not self.check_vault_file_exists():
+            # No vault file - need to create new vault
+            console_print()
+            console_print("=" * 60)
+            console_print("  VAULT SETUP")
+            console_print("=" * 60)
+            console_print()
+            console_print("No vault found. Let's create a new one.")
+            console_print()
+            console_print("Create a secure password to protect your vault.")
+            console_print("This password encrypts your private keys and funds.")
+            console_print()
+            console_print("IMPORTANT: Save this password in a secure location!")
+            console_print("If you lose this password, you will lose access to your vault.")
+            console_print("There is no way to recover a lost vault password.")
+            console_print()
+            console_print("=" * 60)
+            console_print()
+
+            return self.setup_new_vault()
+        else:
+            # Vault file exists - need to unlock it
+            console_print()
+            console_print("=" * 60)
+            console_print("  VAULT UNLOCK")
+            console_print("=" * 60)
+            console_print()
+
+            # Try config password first (backward compatibility, like web UI)
+            if config_password:
+                console_print("Attempting to unlock vault with config password...")
+                if self.unlock_existing_vault(config_password):
+                    console_print("Vault unlocked successfully!")
+                    console_print()
+                    return True
+                else:
+                    console_print("Config password failed. Please enter your password manually.")
+                    console_print()
+
+            console_print("Please enter your vault password to unlock.")
+            console_print("(Press Ctrl+C to exit)")
+            console_print()
+            console_print("=" * 60)
+            console_print()
+
+            # Prompt for password (unlimited attempts, like web UI)
+            while True:
+                console_write("Enter vault password: ")
+                password = console_readline().strip()
+
+                if self.unlock_existing_vault(password):
+                    console_print()
+                    console_print("Vault unlocked successfully!")
+                    console_print()
+                    return True
+                else:
+                    console_print("Invalid password. Please try again.")
+                    console_print()
+
+    def setup_new_vault(self) -> bool:
+        """
+        Create a new vault with password (DO NOT save password to config).
+        Matches web UI behavior.
+        """
+        while True:
+            console_write("Enter new vault password (min 4 characters): ")
+            password1 = console_readline().strip()
+
+            if len(password1) < 4:
+                console_print("Password must be at least 4 characters. Please try again.")
+                console_print()
+                continue
+
+            console_write("Confirm password: ")
+            password2 = console_readline().strip()
+
+            if password1 != password2:
+                console_print("Passwords do not match. Please try again.")
+                console_print()
+                continue
+
+            # Try to create the vault using WalletManager
+            try:
+                from satorineuron.init.wallet import WalletManager
+
+                # Create wallet manager without using config password
+                wallet_manager = WalletManager.create(useConfigPassword=False)
+                vault = wallet_manager.openVault(password=password1, create=True)
+
+                if vault and vault.isDecrypted:
+                    self._vault_password = password1  # Store in memory for session
+                    console_print()
+                    console_print("Vault created successfully!")
+                    console_print()
+                    console_print("REMINDER: Please save your password securely!")
+                    console_print("         You will need it to access your vault.")
+                    console_print()
+                    return True
+                else:
+                    console_print("Error creating vault. Please try again.")
+                    console_print()
+                    return False
+            except Exception as e:
+                console_print(f"Error creating vault: {e}")
+                console_print()
+                return False
+
+    def unlock_existing_vault(self, password: str) -> bool:
+        """
+        Unlock existing vault with password.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            from satorineuron.init.wallet import WalletManager
+
+            # Create wallet manager without using config password
+            wallet_manager = WalletManager.create(useConfigPassword=False)
+            vault = wallet_manager.openVault(password=password, create=False)
+
+            if vault and vault.isDecrypted:
+                self._vault_password = password  # Store in memory for session
+                return True
+            else:
+                return False
+        except Exception:
+            return False
 
     def start_neuron_background(self):
         """Start the neuron in a background thread."""
@@ -511,11 +658,15 @@ class NeuronCLI:
         console_print("Satori Neuron CLI. Type /help for commands, /exit to quit.")
         console_print()
 
-        # Check if vault password exists, if not, prompt for mandatory creation
-        if not self.check_vault_password_exists():
-            if not self.prompt_mandatory_vault_password():
-                console_print("Vault password is required. Exiting.")
+        # Prompt for vault setup or unlock (matches web UI behavior)
+        try:
+            if not self.prompt_vault_setup_or_unlock():
+                console_print("Vault access required. Exiting.")
                 return
+        except (KeyboardInterrupt, EOFError):
+            console_print()
+            console_print("Exiting...")
+            return
 
         # Start neuron in background
         self.start_neuron_background()
