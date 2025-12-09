@@ -444,32 +444,270 @@ class NeuronCLI:
         self.add_log("Starting neuron in background...")
         threading.Thread(target=run, daemon=True).start()
 
+    def interactive_menu(self, title: str, options: list[dict]) -> int | None:
+        """
+        Display an interactive menu with arrow key navigation.
+
+        Args:
+            title: Menu title to display
+            options: List of dicts with 'label' and 'action' keys
+                     e.g., [{'label': 'Option 1', 'action': callable}, ...]
+
+        Returns:
+            Index of selected option, or None if cancelled
+        """
+        selected = 0
+
+        # Use the original stdin fd for reading
+        fd = _original_stdin_fd
+        old_settings = termios.tcgetattr(fd)
+
+        try:
+            tty.setraw(fd)
+
+            # Initial render
+            console_write('\r\n')
+            console_write(title + '\r\n')
+            console_write("-" * len(title) + '\r\n')
+            for i, option in enumerate(options):
+                if i == selected:
+                    console_write(f"  > \x1b[7m{option['label']}\x1b[0m\r\n")  # Highlighted
+                else:
+                    console_write(f"    {option['label']}\r\n")
+            console_write('\r\n')
+            console_write("(Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel)\r\n")
+
+            # Number of lines printed (title + separator + options + blank + help text)
+            lines_printed = 2 + len(options) + 1 + 1
+
+            while True:
+                # Read one character
+                ch = os.read(fd, 1).decode('utf-8', errors='ignore')
+
+                if ch == '\r' or ch == '\n':  # Enter - select
+                    # Clear menu
+                    console_write(f'\x1b[{lines_printed}A')  # Move cursor up
+                    for _ in range(lines_printed):
+                        console_write('\x1b[2K\n')  # Clear line and move down
+                    console_write(f'\x1b[{lines_printed}A')  # Move back up
+                    return selected
+
+                elif ch == '\x03':  # Ctrl+C - cancel
+                    # Clear menu
+                    console_write(f'\x1b[{lines_printed}A')
+                    for _ in range(lines_printed):
+                        console_write('\x1b[2K\n')
+                    console_write(f'\x1b[{lines_printed}A')
+                    raise KeyboardInterrupt
+
+                elif ch == '\x1b':  # Escape sequence
+                    seq1 = os.read(fd, 1).decode('utf-8', errors='ignore')
+                    if seq1 == '[':
+                        seq2 = os.read(fd, 1).decode('utf-8', errors='ignore')
+
+                        old_selected = selected
+
+                        if seq2 == 'A':  # Up arrow
+                            selected = max(0, selected - 1)
+                        elif seq2 == 'B':  # Down arrow
+                            selected = min(len(options) - 1, selected + 1)
+
+                        # If selection changed, redraw
+                        if old_selected != selected:
+                            # Move cursor back to start of menu
+                            console_write(f'\x1b[{lines_printed}A')
+
+                            # Redraw menu
+                            console_write('\x1b[2K')  # Clear title line
+                            console_write(title + '\r\n')
+                            console_write('\x1b[2K')
+                            console_write("-" * len(title) + '\r\n')
+                            for i, option in enumerate(options):
+                                console_write('\x1b[2K')  # Clear line
+                                if i == selected:
+                                    console_write(f"  > \x1b[7m{option['label']}\x1b[0m\r\n")
+                                else:
+                                    console_write(f"    {option['label']}\r\n")
+                            console_write('\x1b[2K\r\n')  # Clear blank line
+                            console_write('\x1b[2K')
+                            console_write("(Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel)\r\n")
+
+                    elif seq1 == '\x1b':  # Double escape (Esc key) - cancel
+                        # Clear menu
+                        console_write(f'\x1b[{lines_printed}A')
+                        for _ in range(lines_printed):
+                            console_write('\x1b[2K\n')
+                        console_write(f'\x1b[{lines_printed}A')
+                        return None
+
+        except KeyboardInterrupt:
+            return None
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    def get_wallet_balance_electrumx(self) -> str:
+        """Fetch wallet balance from ElectrumX servers."""
+        if not self.startup or not hasattr(self.startup, 'walletManager'):
+            return "Neuron is starting... Use /logs neuron to see progress."
+
+        try:
+            # Get wallet manager
+            wallet_manager = self.startup.walletManager
+            if not wallet_manager:
+                return "Wallet manager not initialized."
+
+            # Ensure ElectrumX connection
+            if hasattr(wallet_manager, 'connect'):
+                connected = wallet_manager.connect()
+                if not connected:
+                    return "Error: Could not connect to ElectrumX servers.\nPlease check your network connection."
+
+            # Get wallet
+            wallet = wallet_manager.wallet
+            if not wallet:
+                return "Wallet not available."
+
+            # Fetch balances from ElectrumX
+            if hasattr(wallet, 'getBalances'):
+                wallet.getBalances()
+
+            # Format and return balance information
+            lines = ["Wallet Balance:"]
+            lines.append("-" * 40)
+
+            # SATORI balance
+            if hasattr(wallet, 'balance') and wallet.balance:
+                satori_amount = wallet.balance.amount
+                lines.append(f"  SATORI: {satori_amount:.8f}")
+            else:
+                lines.append("  SATORI: 0.00000000")
+
+            # EVR balance
+            if hasattr(wallet, 'currency') and wallet.currency:
+                evr_amount = wallet.currency.amount
+                lines.append(f"  EVR:    {evr_amount:.8f}")
+            else:
+                lines.append("  EVR:    0.00000000")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Error fetching wallet balance: {e}"
+
+    def get_vault_balance_electrumx(self) -> str:
+        """Fetch vault balance from ElectrumX servers."""
+        if not self.startup or not hasattr(self.startup, 'walletManager'):
+            return "Neuron is starting... Use /logs neuron to see progress."
+
+        try:
+            # Get wallet manager
+            wallet_manager = self.startup.walletManager
+            if not wallet_manager:
+                return "Wallet manager not initialized."
+
+            # Ensure ElectrumX connection
+            if hasattr(wallet_manager, 'connect'):
+                connected = wallet_manager.connect()
+                if not connected:
+                    return "Error: Could not connect to ElectrumX servers.\nPlease check your network connection."
+
+            # Get vault
+            vault = wallet_manager.vault
+            if not vault:
+                return "Vault not available.\nPlease create or unlock your vault first."
+
+            # Check if vault is decrypted
+            if hasattr(vault, 'isDecrypted') and not vault.isDecrypted:
+                return "Vault is locked.\nPlease unlock your vault first with /vault-open."
+
+            # Fetch balances from ElectrumX
+            if hasattr(vault, 'getBalances'):
+                vault.getBalances()
+
+            # Format and return balance information
+            lines = ["Vault Balance:"]
+            lines.append("-" * 40)
+
+            # SATORI balance
+            if hasattr(vault, 'balance') and vault.balance:
+                satori_amount = vault.balance.amount
+                lines.append(f"  SATORI: {satori_amount:.8f}")
+            else:
+                lines.append("  SATORI: 0.00000000")
+
+            # EVR balance
+            if hasattr(vault, 'currency') and vault.currency:
+                evr_amount = vault.currency.amount
+                lines.append(f"  EVR:    {evr_amount:.8f}")
+            else:
+                lines.append("  EVR:    0.00000000")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Error fetching vault balance: {e}"
+
     def handle_command(self, user_input: str) -> str | None:
         """Process user commands and return response."""
         user_input = user_input.strip()
 
         if user_input == "/help":
-            return """Available commands:
-  /logs          - View logs sub-menu
-  /status        - Show current status
-  /balance       - Show wallet balance
+            return """Satori Neuron CLI - Available Commands
+
+Monitoring:
+  /logs          - View neuron or engine logs (interactive menu)
+
+Wallet & Rewards:
+  /balance       - Show wallet or vault balance (interactive menu)
+  /stake         - Check stake status
+  /pool          - Show pool status
+
+Streams & Engine:
   /streams       - Show stream assignments
   /pause         - Pause the engine
   /unpause       - Unpause the engine
+
+System:
   /restart       - Restart the neuron
-  /stake         - Check stake status
-  /pool          - Show pool status
-  /vault-create  - Create a new vault with password
-  /vault-open    - Open existing vault with password
-  /vault-status  - Check vault status
   /clear         - Clear the screen
   /help          - Show this help message
   /exit          - Exit CLI (neuron keeps running)"""
 
         elif user_input == "/logs":
-            return """Logs sub-menu:
-  /logs neuron   - Show neuron logs
-  /logs engine   - Show engine logs"""
+            # Interactive menu for logs
+            options = [
+                {'label': 'Neuron Logs', 'action': 'neuron'},
+                {'label': 'Engine Logs', 'action': 'engine'}
+            ]
+
+            selected = self.interactive_menu("Logs Menu", options)
+
+            if selected is None:
+                return "Cancelled."
+
+            # Execute the selected option
+            action = options[selected]['action']
+            if action == 'neuron':
+                logs = _log_buffer[-50:]
+                if not logs:
+                    return "No logs yet."
+                return "\n".join(logs)
+            elif action == 'engine':
+                # Filter logs for engine-related messages
+                engine_keywords = [
+                    'engine', 'Engine', 'adapter', 'Adapter', 'prediction',
+                    'Prediction', 'StreamModel', 'stream model', 'forecast',
+                    'XgbAdapter', 'StarterAdapter', 'XgbChronosAdapter',
+                    'model training', 'inference', 'Engine DB'
+                ]
+                engine_logs = [
+                    log for log in _log_buffer
+                    if any(keyword in log for keyword in engine_keywords)
+                ]
+                logs = engine_logs[-50:]
+                if not logs:
+                    return "No engine logs yet."
+                return "\n".join(logs)
 
         elif user_input == "/logs neuron":
             logs = _log_buffer[-50:]
@@ -509,16 +747,27 @@ class NeuronCLI:
             return "\n".join(status_lines)
 
         elif user_input == "/balance":
-            if not self.neuron_started:
+            # Check if startup object exists and has wallet manager
+            if not self.startup or not hasattr(self.startup, 'walletManager'):
                 return "Neuron is starting... Use /logs neuron to see progress."
-            balance_lines = [
-                f"Holding Balance: {self.startup.holdingBalance}",
-                f"Server Balance: {self.startup.getBalance('currency')}",
+
+            # Interactive menu for balance
+            options = [
+                {'label': 'Wallet Balance', 'action': 'wallet'},
+                {'label': 'Vault Balance', 'action': 'vault'}
             ]
-            if self.startup.balances:
-                for k, v in self.startup.balances.items():
-                    balance_lines.append(f"  {k}: {v}")
-            return "\n".join(balance_lines)
+
+            selected = self.interactive_menu("Balance Menu", options)
+
+            if selected is None:
+                return "Cancelled."
+
+            # Execute the selected option
+            action = options[selected]['action']
+            if action == 'wallet':
+                return self.get_wallet_balance_electrumx()
+            elif action == 'vault':
+                return self.get_vault_balance_electrumx()
 
         elif user_input == "/streams":
             if not self.neuron_started:
