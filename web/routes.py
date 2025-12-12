@@ -14,6 +14,7 @@ import requests
 import uuid
 from threading import Lock
 from cryptography.fernet import Fernet
+from satorilib.config import get_api_url
 from flask import (
     render_template,
     redirect,
@@ -176,7 +177,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     Returns:
         dict with peer info if successful, None if failed
     """
-    api_url = app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+    api_url = app.config.get('SATORI_API_URL', get_api_url())
 
     # Get wallet pubkey (identity)
     wallet_pubkey = None
@@ -467,7 +468,7 @@ def register_routes(app):
     @app.route('/health')
     def health():
         """Health check endpoint - checks API server connectivity."""
-        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
         try:
             resp = requests.get(f"{api_url}/health", timeout=5)
             if resp.status_code == 200:
@@ -489,7 +490,7 @@ def register_routes(app):
         if not wallet_manager or not wallet_manager.wallet:
             return None
 
-        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
 
         try:
             # Step 1: Get challenge
@@ -527,7 +528,7 @@ def register_routes(app):
 
     def proxy_api(endpoint, method='GET', data=None, authenticated=True):
         """Proxy requests to the Satori API server."""
-        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
         url = f"{api_url}/api/v1{endpoint}"
 
         # Get auth headers for authenticated requests

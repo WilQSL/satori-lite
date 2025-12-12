@@ -46,11 +46,9 @@ class SatoriServerClient(object):
         *args, **kwargs
     ):
         self.wallet = wallet
-        # Updated to point to local development server
-        # Original: 'https://stage.satorinet.io'
-        # Use environment variable or default to localhost
-        import os
-        default_url = os.environ.get('SATORI_CENTRAL_URL', 'http://localhost:8000')
+        # Use central config for URL
+        from satorilib.config import get_central_url
+        default_url = get_central_url()
         self.url = url or default_url
         self.sendingUrl = sendingUrl or default_url
         self.topicTime: dict[str, float] = {}
