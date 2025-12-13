@@ -682,6 +682,7 @@ System:
 
     def show_main_menu(self) -> str | None:
         """Show interactive main menu and return selected action."""
+        from satorineuron import VERSION
         # Clear screen and show logo
         console_write("\033[2J\033[H")
         console_print()
@@ -703,7 +704,7 @@ System:
         console_print("     @@@@@@@@@@@@@@@@@@@@")
         console_print("        @@@@@@@@@@@@@@")
         console_print()
-        console_print("    Satori Neuron CLI")
+        console_print(f"    Satori Neuron CLI - {VERSION}")
         console_print()
 
         options = [
@@ -740,9 +741,10 @@ System:
         console_print("   @@@@@@ @@@@@@@@@ @@@@@@")
         console_print("     @@@@@@@@@@@@@@@@@@@@")
         console_print("        @@@@@@@@@@@@@@")
+        from satorineuron import VERSION
         console_print()
         console_print("    Satori Neuron CLI")
-        console_print("    Wallet & Vault Manager")
+        console_print(f"    Wallet & Vault Manager - {VERSION}")
         console_print()
 
         # Prompt for vault setup or unlock (matches web UI behavior)
@@ -811,5 +813,5 @@ System:
 
 
 if __name__ == "__main__":
-    cli = NeuronCLI(env='prod', runMode='worker')
+    cli = NeuronCLI(env=os.environ.get('SATORI_ENV', 'prod'), runMode='worker')
     cli.run()

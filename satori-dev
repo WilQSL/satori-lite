@@ -87,6 +87,7 @@ case "$1" in
                     -v "$(pwd)/engine-lite:/Satori/Engine" \
                     -v "$(pwd)/web:/Satori/web" \
                     -v "$(pwd)/neuron-lite/models:/Satori/models" \
+                    -e SATORI_ENV=dev \
                     -e SATORI_CENTRAL_URL=$CENTRAL_URL \
                     -e SATORI_API_URL=$API_URL \
                     -e PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori" \

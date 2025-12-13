@@ -357,6 +357,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def startWorker(self):
         """start the satori engine."""
         logging.info("running in worker mode", color="blue")
+        self.recordServerConnection()
         self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
@@ -654,6 +655,6 @@ if __name__ == "__main__":
     web_early_thread = threading.Thread(target=start_web_early, daemon=True)
     web_early_thread.start()
 
-    startup = StartupDag.create(env='prod', runMode='worker')
+    startup = StartupDag.create(env=os.environ.get('SATORI_ENV', 'prod'), runMode='worker')
 
     threading.Event().wait()

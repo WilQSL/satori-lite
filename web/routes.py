@@ -463,7 +463,8 @@ def register_routes(app):
     @login_required
     def dashboard():
         """Main dashboard page."""
-        return render_template('dashboard.html')
+        from satorineuron import VERSION
+        return render_template('dashboard.html', version=VERSION)
 
     @app.route('/health')
     def health():
