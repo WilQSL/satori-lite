@@ -929,8 +929,8 @@
         loadAvailablePools();
         loadPoolCommission();
 
-        // Periodic health check
-        setInterval(checkHealth, 30000);
+        // Periodic health check - Disabled to reduce unnecessary load
+        // setInterval(checkHealth, 30000);
     });
 </script>
 {% endblock %}
