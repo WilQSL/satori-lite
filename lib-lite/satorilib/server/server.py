@@ -237,8 +237,25 @@ class SatoriServerClient(object):
             if health_response.status_code == 200:
                 logging.info('connected to central-lite', color='green')
 
-                # For central-lite: Peer registration happens automatically during authentication
-                # via the authenticate() dependency. No separate checkin endpoint needed.
+                # For central-lite: Register peer with vault info
+                # Call /api/v1/peer/register with vault-pubkey header
+                if vaultInfo and vaultInfo.get('vaultpubkey'):
+                    try:
+                        headers = {
+                            'wallet-pubkey': self.wallet.pubkey,
+                            'vault-pubkey': vaultInfo.get('vaultpubkey')
+                        }
+                        register_response = requests.post(
+                            self.url + '/api/v1/peer/register',
+                            headers=headers,
+                            timeout=10
+                        )
+                        if register_response.status_code == 200:
+                            logging.info('peer registered with vault info', color='green')
+                        else:
+                            logging.warning(f'peer registration failed: {register_response.text}')
+                    except Exception as e:
+                        logging.warning(f'peer registration error: {e}')
 
                 # Return minimal checkin data for central-lite
                 self.lastCheckin = time.time()

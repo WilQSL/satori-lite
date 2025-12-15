@@ -171,7 +171,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
 
     Args:
         app: Flask app instance for config access
-        wallet_manager: The wallet manager instance with wallet and vault
+        wallet_manager: The wallet manager instance with wallet and vault (both must be decrypted)
         max_retries: Maximum number of retry attempts
 
     Returns:
@@ -179,18 +179,37 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     """
     api_url = app.config.get('SATORI_API_URL', get_api_url())
 
-    # Get wallet pubkey (identity)
+    # Validate wallet exists
+    if not wallet_manager.wallet:
+        logger.error("Wallet not initialized - cannot register peer")
+        return None
+
+    # Validate vault exists and is decrypted
+    if not wallet_manager.vault:
+        logger.error("Vault not initialized - cannot register peer")
+        return None
+
+    if not hasattr(wallet_manager.vault, 'isDecrypted') or not wallet_manager.vault.isDecrypted:
+        logger.error("Vault is not decrypted - cannot register peer")
+        return None
+
+    # Get wallet pubkey (identity) - REQUIRED
     wallet_pubkey = None
-    if wallet_manager.wallet and hasattr(wallet_manager.wallet, 'pubkey'):
+    if hasattr(wallet_manager.wallet, 'pubkey'):
         wallet_pubkey = wallet_manager.wallet.pubkey
 
-    # Get vault pubkey
+    # Get vault pubkey - REQUIRED (not optional)
     vault_pubkey = None
-    if wallet_manager.vault and hasattr(wallet_manager.vault, 'pubkey'):
+    if hasattr(wallet_manager.vault, 'pubkey'):
         vault_pubkey = wallet_manager.vault.pubkey
 
+    # Validate both pubkeys are present
     if not wallet_pubkey:
-        logger.warning("No wallet pubkey available for peer registration")
+        logger.error("Wallet pubkey not available - cannot register peer")
+        return None
+
+    if not vault_pubkey:
+        logger.error("Vault pubkey not available - cannot register peer")
         return None
 
     for attempt in range(max_retries):
@@ -210,9 +229,14 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
                     return data
 
             # Step 2: Peer not found, register
-            headers = {'wallet-pubkey': wallet_pubkey}
-            if vault_pubkey:
-                headers['vault-pubkey'] = vault_pubkey
+            # POST /api/v1/peer/register
+            # Required headers:
+            #   - wallet-pubkey: The identity wallet's public key (REQUIRED)
+            #   - vault-pubkey: The vault wallet's public key (REQUIRED - must be decrypted)
+            headers = {
+                'wallet-pubkey': wallet_pubkey,
+                'vault-pubkey': vault_pubkey
+            }
 
             resp = requests.post(
                 f"{api_url}/api/v1/peer/register",

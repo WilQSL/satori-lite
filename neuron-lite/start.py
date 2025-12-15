@@ -201,6 +201,38 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         else:
             return ""
 
+    def getVaultInfoFromFile(self) -> dict:
+        """Read vault info (address and pubkey) from vault.yaml without decrypting.
+
+        The address and pubkey are stored unencrypted in vault.yaml, so we can read them
+        even when the vault is locked.
+
+        Returns:
+            dict: {'address': str, 'pubkey': str} or empty dict if file doesn't exist
+        """
+        try:
+            import yaml
+            vault_path = config.walletPath('vault.yaml')
+            if not os.path.exists(vault_path):
+                return {}
+
+            with open(vault_path, 'r') as f:
+                vault_data = yaml.safe_load(f)
+
+            result = {}
+            if vault_data:
+                # Address is under evr: section
+                if 'evr' in vault_data and 'address' in vault_data['evr']:
+                    result['address'] = vault_data['evr']['address']
+                # publicKey is at top level
+                if 'publicKey' in vault_data:
+                    result['pubkey'] = vault_data['publicKey']
+
+            return result
+        except Exception as e:
+            logging.warning(f"Could not read vault info from file: {e}")
+            return {}
+
     def setupWalletManager(self):
         # Never auto-decrypt the global vault - it should remain encrypted
         self.walletManager = WalletManager.create(useConfigPassword=False)
@@ -404,14 +436,21 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         while True:
             attempt += 1
             try:
-                vault = self.getVault()
+                # Get vault info from vault.yaml (available even when encrypted)
+                vault_info = self.getVaultInfoFromFile()
+
+                # Build vaultInfo dict for checkin
+                vaultInfo = None
+                if vault_info.get('address') or vault_info.get('pubkey'):
+                    vaultInfo = {
+                        'vaultaddress': vault_info.get('address'),
+                        'vaultpubkey': vault_info.get('pubkey')
+                    }
+
                 self.details = CheckinDetails(
                     self.server.checkin(
                         ip=self.ip,
-                        vaultInfo={
-                            'vaultaddress': vault.address,
-                            'vaultpubkey': vault.pubkey,
-                        } if isinstance(vault, EvrmoreWallet) else None))
+                        vaultInfo=vaultInfo))
 
                 # For central-lite: no subscriptions/publications/keys needed
                 # Just store minimal response data
