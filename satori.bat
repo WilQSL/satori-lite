@@ -92,8 +92,39 @@ echo Satori neuron %INSTANCE% stopped and removed
 exit /b 0
 
 :restart
-docker restart %CONTAINER_NAME%
-echo Satori neuron %INSTANCE% restarted
+echo Restarting Satori neuron %INSTANCE%...
+:: Stop and remove container
+docker stop %CONTAINER_NAME% 2>nul
+docker rm %CONTAINER_NAME% 2>nul
+
+:: Create data directories
+if not exist "%DATA_DIR%\config" mkdir "%DATA_DIR%\config"
+if not exist "%DATA_DIR%\wallet" mkdir "%DATA_DIR%\wallet"
+if not exist "%DATA_DIR%\models" mkdir "%DATA_DIR%\models"
+if not exist "%DATA_DIR%\data" mkdir "%DATA_DIR%\data"
+
+:: Pull latest image
+echo Pulling latest image...
+docker pull %IMAGE%
+
+:: Create and run container
+docker run -d --name %CONTAINER_NAME% ^
+    --restart unless-stopped ^
+    -p %PORT%:%PORT% ^
+    -e SATORI_ENV=prod ^
+    -e SATORI_UI_PORT=%PORT% ^
+    -v "%DATA_DIR%\config:/Satori/Neuron/config" ^
+    -v "%DATA_DIR%\wallet:/Satori/Neuron/wallet" ^
+    -v "%DATA_DIR%\models:/Satori/models" ^
+    -v "%DATA_DIR%\data:/Satori/Engine/db" ^
+    %IMAGE%
+
+if %errorlevel% neq 0 (
+    echo Error: Failed to create container.
+    exit /b 1
+)
+
+echo Satori neuron %INSTANCE% restarted with latest image (port %PORT%)
 exit /b 0
 
 :logs
@@ -140,6 +171,7 @@ docker pull %IMAGE%
 docker run -d --name %CONTAINER_NAME% ^
     --restart unless-stopped ^
     -p %PORT%:%PORT% ^
+    -e SATORI_ENV=prod ^
     -e SATORI_UI_PORT=%PORT% ^
     -v "%DATA_DIR%\config:/Satori/Neuron/config" ^
     -v "%DATA_DIR%\wallet:/Satori/Neuron/wallet" ^
