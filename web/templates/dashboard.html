@@ -306,6 +306,38 @@
                             </div>
                         </span>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Lenders</label>
+                        <div id="lenderList" class="mb-3">
+                            <p class="text-muted">No lenders</p>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Pool Audits</label>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-primary btn-sm" onclick="downloadWorkersAudit()">
+                                <i class="material-icons align-middle" style="font-size: 16px;">download</i>
+                                Download Workers Audit
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" onclick="downloadLendersAudit()">
+                                <i class="material-icons align-middle" style="font-size: 16px;">download</i>
+                                Download Lenders Audit
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">
+                            Download the latest audit files showing worker distributions and lender commissions.
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Lender Payments</label>
+                        <button class="btn btn-success btn-sm" onclick="payLenders()">
+                            <i class="material-icons align-middle" style="font-size: 16px;">payments</i>
+                            Pay Lenders From Audit
+                        </button>
+                        <small class="form-text text-muted">
+                            Automatically pay your lenders based on the latest audit file (up to 1000 lenders in one transaction).
+                        </small>
+                    </div>
                 </div>
             </div>
         </div>
@@ -675,6 +707,224 @@
         updateMutualExclusionUI();
     }
 
+    async function loadLenders() {
+        const lenderListEl = document.getElementById('lenderList');
+        const result = await apiCall('/pool/lenders');
+
+        if (result && result.lenders && result.lenders.length > 0) {
+            lenderListEl.innerHTML = '';
+            result.lenders.forEach(lender => {
+                const lenderItem = document.createElement('div');
+                lenderItem.className = 'd-flex justify-content-between align-items-center mb-2 p-2 border rounded';
+                lenderItem.innerHTML = `
+                    <div>
+                        <small class="text-muted">Address:</small><br>
+                        <code class="small">${lender.address}</code>
+                        ${lender.alias ? `<br><span class="badge bg-secondary">${lender.alias}</span>` : ''}
+                    </div>
+                `;
+                lenderListEl.appendChild(lenderItem);
+            });
+        } else {
+            lenderListEl.innerHTML = '<p class="text-muted">No lenders</p>';
+        }
+    }
+
+    // Get central-lite API URL
+    function getCentralApiUrl() {
+        // For development: assume central-lite runs on port 8000
+        // For production: this should be configured properly
+        const protocol = window.location.protocol;
+        const hostname = window.location.hostname;
+
+        // If we're on localhost, use localhost:8000
+        // Otherwise, use the same hostname (assumes central-lite on same domain)
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return `${protocol}//${hostname}:8000`;
+        }
+        return `${protocol}//${hostname}`;
+    }
+
+    // Helper function to download JSON data as a file
+    function downloadJSON(data, filename) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], {
+            type: 'application/json'
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // Download workers audit
+    async function downloadWorkersAudit() {
+        try {
+            const centralApiUrl = getCentralApiUrl();
+            const response = await fetch(`${centralApiUrl}/api/v1/audit/workers/latest`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    showToast('No workers audit available yet', 'warning');
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Generate filename with timestamp
+            const now = new Date();
+            const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            const filename = `workers_audit_${timestamp}.json`;
+
+            downloadJSON(data, filename);
+            showToast('Workers audit downloaded');
+        } catch (error) {
+            console.error('Error downloading workers audit:', error);
+            showToast('Failed to download workers audit', 'error');
+        }
+    }
+
+    // Download lenders audit
+    async function downloadLendersAudit() {
+        try {
+            const centralApiUrl = getCentralApiUrl();
+            const response = await fetch(`${centralApiUrl}/api/v1/audit/lenders/latest`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    showToast('No lenders audit available yet', 'warning');
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Generate filename with timestamp
+            const now = new Date();
+            const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            const filename = `lenders_audit_${timestamp}.json`;
+
+            downloadJSON(data, filename);
+            showToast('Lenders audit downloaded');
+        } catch (error) {
+            console.error('Error downloading lenders audit:', error);
+            showToast('Failed to download lenders audit', 'error');
+        }
+    }
+
+    // Pay lenders from audit
+    async function payLenders() {
+        try {
+            // 1. Fetch audit
+            showToast('Fetching audit...', 'info');
+            const centralApiUrl = getCentralApiUrl();
+            const response = await fetch(`${centralApiUrl}/api/v1/audit/lenders/latest`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    showToast('No audit available yet', 'warning');
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const audit = await response.json();
+
+            // 2. Find my pool and lenders
+            const myAddress = await apiCall('/wallet/address');
+            if (!myAddress || !myAddress.wallet_address) {
+                showToast('Unable to determine your wallet address', 'error');
+                return;
+            }
+
+            const myPool = audit.pools.find(p => p.pool_address === myAddress.wallet_address);
+
+            if (!myPool || !myPool.lenders || myPool.lenders.length === 0) {
+                showToast('No lenders to pay', 'info');
+                return;
+            }
+
+            // 3. Build payment dictionary
+            const payments = {};
+            myPool.lenders.forEach(lender => {
+                if (lender.commission_owed > 0) {
+                    payments[lender.lender_address] = lender.commission_owed;
+                }
+            });
+
+            const count = Object.keys(payments).length;
+            if (count === 0) {
+                showToast('No lenders with amounts owed', 'info');
+                return;
+            }
+
+            const total = Object.values(payments).reduce((sum, amt) => sum + amt, 0);
+
+            // 4. Check balance
+            const balance = await apiCall('/wallet/balance/direct');
+            if (!balance) {
+                showToast('Unable to check balance', 'error');
+                return;
+            }
+
+            if (balance.vault_balance < total) {
+                showToast(`Insufficient balance: need ${total.toFixed(8)}, have ${balance.vault_balance.toFixed(8)}`, 'error');
+                return;
+            }
+
+            // 5. Confirm with user
+            const confirmMsg =
+                `Pay ${count} lenders a total of ${total.toFixed(8)} SATORI?\n\n` +
+                `Your balance: ${balance.vault_balance.toFixed(8)} SATORI\n` +
+                `EVR for fees: ${balance.vault_evr.toFixed(8)} EVR\n\n` +
+                `⚠️ This action cannot be undone!`;
+
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            // 6. Send payment
+            showToast('Sending payment to lenders...', 'info');
+
+            const paymentResponse = await fetch('/api/lender/pay', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({payments})
+            });
+
+            const data = await paymentResponse.json();
+
+            if (data.success) {
+                // 7. Show success
+                const explorerUrl = `https://evr.cryptoscope.io/tx/?hash=${data.txhash}`;
+                showToast(`✓ Paid ${data.lenders_paid} lenders!`, 'success');
+
+                const resultMsg =
+                    `Successfully paid ${data.lenders_paid} lenders!\n\n` +
+                    `Total: ${data.total_sent.toFixed(8)} SATORI\n\n` +
+                    `Transaction: ${data.txhash}\n\n` +
+                    `View on blockchain explorer:\n${explorerUrl}`;
+
+                alert(resultMsg);
+
+                // Refresh balance
+                loadAllBalances();
+            } else {
+                showToast(`Payment failed: ${data.error}`, 'error');
+            }
+
+        } catch (error) {
+            console.error('Error paying lenders:', error);
+            showToast(`Failed to pay lenders: ${error.message}`, 'error');
+        }
+    }
+
     function isValidAddress(address) {
         return address && address.length === 34 && address.startsWith('E');
     }
@@ -963,6 +1213,7 @@
         loadRewardAddress();
         loadStakingStatus();
         loadWorkers();
+        loadLenders();
         loadAvailablePools();
         loadPoolCommission();
 
