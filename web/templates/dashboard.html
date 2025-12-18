@@ -829,11 +829,11 @@
         }
     }
 
-    // Download lenders audit
+    // Download pool stakers audit
     async function downloadLendersAudit() {
         try {
             const centralApiUrl = getCentralApiUrl();
-            const response = await fetch(`${centralApiUrl}/api/v1/audit/lenders/latest`);
+            const response = await fetch(`${centralApiUrl}/api/v1/audit/stakers/latest`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -848,7 +848,7 @@
             // Generate filename with timestamp
             const now = new Date();
             const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
-            const filename = `lenders_audit_${timestamp}.json`;
+            const filename = `stakers_audit_${timestamp}.json`;
 
             downloadJSON(data, filename);
             showToast('Pool stakers audit downloaded');
@@ -864,7 +864,7 @@
             // 1. Fetch audit
             showToast('Fetching audit...', 'info');
             const centralApiUrl = getCentralApiUrl();
-            const response = await fetch(`${centralApiUrl}/api/v1/audit/lenders/latest`);
+            const response = await fetch(`${centralApiUrl}/api/v1/audit/stakers/latest`);
 
             if (!response.ok) {
                 if (response.status === 404) {
