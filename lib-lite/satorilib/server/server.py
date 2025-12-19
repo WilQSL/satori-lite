@@ -276,26 +276,12 @@ class SatoriServerClient(object):
                     'stakeRequired': 0,
                     'rewardaddress': None,
                 }
+            else:
+                logging.error(f'central-lite health check returned status {health_response.status_code}', color='red')
+                raise Exception(f'Central-lite health check failed with status {health_response.status_code}')
         except Exception as e:
-            logging.warning(f'central-lite health check failed: {e}', color='yellow')
-
-        # Fallback to original checkin for production central
-        response = self._makeAuthenticatedCall(
-            function=requests.post,
-            endpoint='/checkin',
-            payload=self.wallet.registerPayload(challenge=challenge, vaultInfo=vaultInfo),
-            challenge=challenge,
-            extraHeaders={
-                **({'referrer': referrer} if referrer else {}),
-                **({'ip': ip} if ip else {})},
-            raiseForStatus=False)
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            logging.error('unable to checkin:', response.text, e, color='red')
-            return {'ERROR': response.text}
-        self.lastCheckin = time.time()
-        return response.json()
+            logging.error(f'central-lite connection failed: {e}', color='red')
+            raise Exception(f'Unable to connect to central-lite server: {e}')
 
     def checkinCheck(self) -> bool:
         """Check if there are updates since last checkin."""
@@ -304,24 +290,12 @@ class SatoriServerClient(object):
             health_response = requests.get(self.url + '/health')
             if health_response.status_code == 200:
                 return False  # central-lite doesn't have stream updates
-        except Exception:
-            pass
-
-        # Fallback to original for production central
-        challenge = self._getChallenge()
-        response = self._makeAuthenticatedCall(
-            function=requests.post,
-            endpoint='/checkin/check',
-            payload=self.wallet.registerPayload(challenge=challenge),
-            challenge=challenge,
-            extraHeaders={'changesSince': timeToTimestamp(self.lastCheckin)},
-            raiseForStatus=False)
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            logging.error('unable to checkin:', response.text, e, color='red')
+            else:
+                logging.warning(f'central-lite health check returned status {health_response.status_code}')
+                return False
+        except Exception as e:
+            logging.warning(f'central-lite health check failed in checkinCheck: {e}')
             return False
-        return response.text.lower() == 'true'
 
     def requestSimplePartial(self, network: str):
         ''' sends a satori partial transaction to the server '''
