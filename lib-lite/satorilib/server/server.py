@@ -53,19 +53,39 @@ class SatoriServerClient(object):
         self.sendingUrl = sendingUrl or default_url
         self.topicTime: dict[str, float] = {}
         self.lastCheckin: int = 0
+        # Challenge cache - avoid requesting new challenge for every API call
+        self._challenge_cache: str = None
+        self._challenge_timestamp: float = 0
+        self._challenge_expiry_seconds: int = 300  # 5 minutes
 
     def setTopicTime(self, topic: str):
         self.topicTime[topic] = time.time()
 
     def _getChallenge(self):
-        """Get challenge token from central-lite or fallback to timestamp."""
+        """Get challenge token from central-lite with caching (5 min) to reduce requests."""
+        current_time = time.time()
+
+        # Check if we have a valid cached challenge
+        if self._challenge_cache and (current_time - self._challenge_timestamp) < self._challenge_expiry_seconds:
+            return self._challenge_cache
+
+        # Cache miss or expired - get new challenge
         try:
             response = requests.get(self.url + '/api/v1/auth/challenge')
             if response.status_code == 200:
-                return response.json().get('challenge', str(time.time()))
+                challenge = response.json().get('challenge', str(time.time()))
+                # Cache the new challenge
+                self._challenge_cache = challenge
+                self._challenge_timestamp = current_time
+                return challenge
         except Exception:
             pass
-        return str(time.time())
+
+        # Fallback to timestamp
+        fallback = str(time.time())
+        self._challenge_cache = fallback
+        self._challenge_timestamp = current_time
+        return fallback
 
     def _makeAuthenticatedCall(
         self,
