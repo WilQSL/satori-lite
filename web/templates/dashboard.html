@@ -268,6 +268,81 @@
             </div>
         </div>
     </div>
+
+    <!-- AI Engine Performance Dashboard -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"
+                     style="cursor: pointer;"
+                     data-bs-toggle="collapse"
+                     data-bs-target="#performanceCollapse"
+                     aria-expanded="false"
+                     aria-controls="performanceCollapse">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">show_chart</i>
+                        AI Engine Performance
+                    </h5>
+                </div>
+                <div class="collapse" id="performanceCollapse">
+                <div class="card-body">
+                    <!-- Stats Summary -->
+                    <div class="row mb-4" id="performanceStats">
+                        <div class="col-md-3">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Accuracy</div>
+                                <div class="h4 mb-0" id="accuracyPct">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Avg Error</div>
+                                <div class="h5 mb-0" id="avgError">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Avg Abs Error</div>
+                                <div class="h5 mb-0" id="avgAbsError">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Predictions</div>
+                                <div class="h5 mb-0" id="totalPredictions">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Predictions vs Observations Chart -->
+                    <div class="mb-4">
+                        <h6 class="mb-3">Predictions vs Observations</h6>
+                        <div style="position: relative; height: 300px;">
+                            <canvas id="predVsObsChart"></canvas>
+                        </div>
+                        <small class="text-muted">Last 100 data points</small>
+                    </div>
+
+                    <!-- Accuracy Over Time Chart -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Prediction Accuracy Over Time</h6>
+                        <div style="position: relative; height: 300px;">
+                            <canvas id="accuracyChart"></canvas>
+                        </div>
+                        <small class="text-muted">Absolute error between prediction and next observation</small>
+                    </div>
+
+                    <div class="text-center mt-3">
+                        <button class="btn btn-outline-primary btn-sm" onclick="refreshPerformance()">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                            Refresh Data
+                        </button>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Disclaimer Footer -->
@@ -1383,6 +1458,219 @@
         }
     }
 
+    // AI Engine Performance Charts
+    let predVsObsChart = null;
+    let accuracyChart = null;
+
+    async function loadPerformance() {
+        try {
+            const data = await apiCall('/engine/performance');
+
+            if (!data || data.error) {
+                console.log('Performance data not available:', data?.error);
+                return;
+            }
+
+            // Update stats
+            if (data.stats) {
+                document.getElementById('accuracyPct').textContent =
+                    data.stats.accuracy_pct ? `${data.stats.accuracy_pct}%` : '--';
+                document.getElementById('avgError').textContent =
+                    data.stats.avg_error !== undefined ? data.stats.avg_error.toFixed(2) : '--';
+                document.getElementById('avgAbsError').textContent =
+                    data.stats.avg_abs_error !== undefined ? data.stats.avg_abs_error.toFixed(2) : '--';
+                document.getElementById('totalPredictions').textContent =
+                    data.stats.total_predictions || '0';
+            }
+
+            // Render predictions vs observations chart
+            renderPredVsObsChart(data.observations, data.predictions);
+
+            // Render accuracy chart
+            renderAccuracyChart(data.accuracy);
+
+        } catch (error) {
+            console.error('Error loading performance data:', error);
+        }
+    }
+
+    function renderPredVsObsChart(observations, predictions) {
+        const ctx = document.getElementById('predVsObsChart');
+        if (!ctx) return;
+
+        // Destroy existing chart
+        if (predVsObsChart) {
+            predVsObsChart.destroy();
+        }
+
+        // Prepare data
+        const obsData = observations.map(o => ({
+            x: new Date(o.ts),
+            y: o.value
+        }));
+
+        const predData = predictions.map(p => ({
+            x: new Date(p.ts),
+            y: p.value
+        }));
+
+        // Get theme colors
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const textColor = isDark ? '#a0a0a0' : '#555555';
+        const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+
+        predVsObsChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: [
+                    {
+                        label: 'Observations',
+                        data: obsData,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        tension: 0.1
+                    },
+                    {
+                        label: 'Predictions',
+                        data: predData,
+                        borderColor: 'rgb(153, 102, 255)',
+                        backgroundColor: 'rgba(153, 102, 255, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        tension: 0.1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'day',
+                            displayFormats: {
+                                day: 'MMM dd'
+                            }
+                        },
+                        ticks: { color: textColor },
+                        grid: { color: gridColor }
+                    },
+                    y: {
+                        ticks: { color: textColor },
+                        grid: { color: gridColor }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: textColor }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderAccuracyChart(accuracyData) {
+        const ctx = document.getElementById('accuracyChart');
+        if (!ctx) return;
+
+        // Destroy existing chart
+        if (accuracyChart) {
+            accuracyChart.destroy();
+        }
+
+        // Prepare data
+        const data = accuracyData.map(a => ({
+            x: new Date(a.ts),
+            y: a.abs_error
+        }));
+
+        // Get theme colors
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const textColor = isDark ? '#a0a0a0' : '#555555';
+        const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+
+        accuracyChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Absolute Error',
+                    data: data,
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'day',
+                            displayFormats: {
+                                day: 'MMM dd'
+                            }
+                        },
+                        ticks: { color: textColor },
+                        grid: { color: gridColor }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: textColor },
+                        grid: { color: gridColor }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: textColor }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const point = accuracyData[context.dataIndex];
+                                return [
+                                    `Error: ${context.parsed.y.toFixed(2)}`,
+                                    `Predicted: ${point.predicted.toFixed(2)}`,
+                                    `Actual: ${point.actual.toFixed(2)}`
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function refreshPerformance() {
+        showToast('Refreshing performance data...', 'info');
+        loadPerformance();
+    }
+
     // Initialize dashboard
     document.addEventListener('DOMContentLoaded', function() {
         // Update theme icon based on stored theme
@@ -1420,6 +1708,7 @@
         // loadAvailablePools();
         // loadPoolCommission();
         loadTrainingDelay();  // Load AI engine training frequency setting
+        loadPerformance();  // Load AI engine performance charts
 
         // Periodic health check - Disabled to reduce unnecessary load
         // setInterval(checkHealth, 30000);

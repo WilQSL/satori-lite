@@ -1126,3 +1126,124 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"Error setting training delay: {e}")
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/engine/performance', methods=['GET'])
+    @login_required
+    def get_engine_performance():
+        """Get engine performance metrics (predictions vs observations).
+
+        Returns last 100 observations and predictions with accuracy calculations.
+
+        Returns:
+            JSON with:
+            - observations: [{ts, value}, ...]
+            - predictions: [{ts, value}, ...]
+            - accuracy: [{ts, error, abs_error}, ...]
+            - stats: {avg_error, avg_abs_error, accuracy_pct}
+        """
+        try:
+            from start import getStart
+
+            startup = getStart()
+            if not hasattr(startup, 'aiengine') or startup.aiengine is None:
+                return jsonify({'error': 'AI engine not initialized'}), 503
+
+            # Get first stream (for now, could extend to support multiple streams)
+            if not startup.aiengine.streamModels:
+                return jsonify({'error': 'No streams configured'}), 404
+
+            streamUuid = list(startup.aiengine.streamModels.keys())[0]
+            streamModel = startup.aiengine.streamModels[streamUuid]
+
+            if not hasattr(streamModel, 'storage') or streamModel.storage is None:
+                return jsonify({'error': 'Storage not initialized'}), 503
+
+            # Get last 100 observations
+            obs_df = streamModel.storage.getStreamData(streamModel.streamUuid)
+            if obs_df.empty:
+                return jsonify({
+                    'observations': [],
+                    'predictions': [],
+                    'accuracy': [],
+                    'stats': {}
+                })
+
+            obs_df = obs_df.tail(100).reset_index()
+            observations = [
+                {'ts': str(row['ts']), 'value': float(row['value'])}
+                for _, row in obs_df.iterrows()
+            ]
+
+            # Get last 100 predictions
+            pred_df = streamModel.storage.getPredictions(streamModel.predictionStreamUuid)
+            if pred_df.empty:
+                return jsonify({
+                    'observations': observations,
+                    'predictions': [],
+                    'accuracy': [],
+                    'stats': {}
+                })
+
+            pred_df = pred_df.tail(100).reset_index()
+            predictions = [
+                {'ts': str(row['ts']), 'value': float(row['value'])}
+                for _, row in pred_df.iterrows()
+            ]
+
+            # Calculate accuracy: match each prediction to the next observation
+            import pandas as pd
+            accuracy_data = []
+
+            for _, pred_row in pred_df.iterrows():
+                pred_ts = pred_row['ts']
+                pred_value = float(pred_row['value'])
+
+                # Find next observation after this prediction
+                next_obs = obs_df[obs_df['ts'] > pred_ts]
+                if not next_obs.empty:
+                    obs_value = float(next_obs.iloc[0]['value'])
+                    error = pred_value - obs_value
+                    abs_error = abs(error)
+
+                    accuracy_data.append({
+                        'ts': str(pred_ts),
+                        'error': error,
+                        'abs_error': abs_error,
+                        'predicted': pred_value,
+                        'actual': obs_value
+                    })
+
+            # Calculate statistics
+            stats = {}
+            if accuracy_data:
+                errors = [d['error'] for d in accuracy_data]
+                abs_errors = [d['abs_error'] for d in accuracy_data]
+                actuals = [d['actual'] for d in accuracy_data]
+
+                avg_error = sum(errors) / len(errors)
+                avg_abs_error = sum(abs_errors) / len(abs_errors)
+                avg_actual = sum(actuals) / len(actuals) if actuals else 1
+
+                # Accuracy percentage (100% - average % error)
+                avg_pct_error = (avg_abs_error / avg_actual * 100) if avg_actual != 0 else 0
+                accuracy_pct = max(0, 100 - avg_pct_error)
+
+                stats = {
+                    'avg_error': round(avg_error, 4),
+                    'avg_abs_error': round(avg_abs_error, 4),
+                    'accuracy_pct': round(accuracy_pct, 2),
+                    'total_predictions': len(accuracy_data)
+                }
+
+            return jsonify({
+                'observations': observations,
+                'predictions': predictions,
+                'accuracy': accuracy_data,
+                'stats': stats
+            })
+
+        except Exception as e:
+            logger.error(f"Error getting engine performance: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
