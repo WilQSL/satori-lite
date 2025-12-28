@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 # Global vault reference (will be set by the application) - used by background processes
 _startup_vault = None
 
+# Global startup instance reference (will be set by the application)
+_startup_instance = None
+
 # Session-specific vaults - each browser session gets its own WalletManager
 _session_vaults = {}
 _vault_lock = Lock()
@@ -64,6 +67,18 @@ def set_vault(vault):
 def get_vault():
     """Get the startup vault instance (for backward compatibility)."""
     return _startup_vault
+
+
+def set_startup(startup):
+    """Set the startup instance (used by web routes to access AI engine, etc)."""
+    global _startup_instance
+    _startup_instance = startup
+    logger.info(f"set_startup called: {type(startup).__name__ if startup else 'None'}, has aiengine: {hasattr(startup, 'aiengine') if startup else False}")
+
+
+def get_startup():
+    """Get the startup instance."""
+    return _startup_instance
 
 
 def get_or_create_session_vault():
@@ -511,6 +526,35 @@ def register_routes(app):
         except requests.RequestException:
             pass
         return jsonify({'status': 'ok', 'api': 'disconnected'})
+
+    @app.route('/api/engine/status')
+    def get_engine_status():
+        """Check AI engine initialization status (no auth required for testing)."""
+        startup = get_startup()
+        if startup is None:
+            return jsonify({
+                'initialized': False,
+                'error': 'Startup instance not set'
+            })
+
+        has_aiengine = hasattr(startup, 'aiengine')
+        aiengine_not_none = startup.aiengine is not None if has_aiengine else False
+        has_streams = False
+        stream_count = 0
+
+        if aiengine_not_none and hasattr(startup.aiengine, 'streamModels'):
+            has_streams = bool(startup.aiengine.streamModels)
+            stream_count = len(startup.aiengine.streamModels)
+
+        return jsonify({
+            'initialized': aiengine_not_none,
+            'has_aiengine_attr': has_aiengine,
+            'aiengine_not_none': aiengine_not_none,
+            'has_streams': has_streams,
+            'stream_count': stream_count,
+            'subscriptions_count': len(startup.subscriptions) if hasattr(startup, 'subscriptions') and startup.subscriptions else 0,
+            'publications_count': len(startup.publications) if hasattr(startup, 'publications') and startup.publications else 0
+        })
 
     # API Proxy Routes
     def get_auth_headers():
@@ -1142,10 +1186,11 @@ def register_routes(app):
             - stats: {avg_error, avg_abs_error, accuracy_pct}
         """
         try:
-            from start import getStart
-
-            startup = getStart()
-            if not hasattr(startup, 'aiengine') or startup.aiengine is None:
+            logger.info("Performance endpoint called")
+            # Use the stored startup instance instead of importing
+            startup = get_startup()
+            if startup is None or not hasattr(startup, 'aiengine') or startup.aiengine is None:
+                logger.warning("AI engine not initialized")
                 return jsonify({'error': 'AI engine not initialized'}), 503
 
             # Get first stream (for now, could extend to support multiple streams)
@@ -1160,7 +1205,9 @@ def register_routes(app):
 
             # Get last 100 observations
             obs_df = streamModel.storage.getStreamData(streamModel.streamUuid)
+            logger.info(f"Retrieved {len(obs_df)} observations")
             if obs_df.empty:
+                logger.info("No observations found, returning empty response")
                 return jsonify({
                     'observations': [],
                     'predictions': [],
@@ -1176,7 +1223,9 @@ def register_routes(app):
 
             # Get last 100 predictions
             pred_df = streamModel.storage.getPredictions(streamModel.predictionStreamUuid)
+            logger.info(f"Retrieved {len(pred_df)} predictions")
             if pred_df.empty:
+                logger.info("No predictions found, returning observations only")
                 return jsonify({
                     'observations': observations,
                     'predictions': [],
@@ -1194,12 +1243,43 @@ def register_routes(app):
             import pandas as pd
             accuracy_data = []
 
-            for _, pred_row in pred_df.iterrows():
+            logger.info(f"Calculating accuracy for {len(pred_df)} predictions vs {len(obs_df)} observations")
+            logger.info(f"obs_df['ts'] dtype: {obs_df['ts'].dtype}")
+            logger.info(f"pred_df['ts'] dtype: {pred_df['ts'].dtype}")
+
+            for idx, pred_row in pred_df.iterrows():
                 pred_ts = pred_row['ts']
                 pred_value = float(pred_row['value'])
 
                 # Find next observation after this prediction
-                next_obs = obs_df[obs_df['ts'] > pred_ts]
+                # Ensure timestamp comparison works by converting pred_ts to same type
+                try:
+                    # Convert pred_ts to match obs_df['ts'] dtype
+                    if pd.api.types.is_datetime64_any_dtype(obs_df['ts']):
+                        # Observations are datetime - convert pred_ts to datetime
+                        pred_ts_compare = pd.to_datetime(pred_ts)
+                    elif pd.api.types.is_numeric_dtype(obs_df['ts']):
+                        # Observations are numeric (Unix timestamps)
+                        # Try to convert pred_ts to numeric
+                        try:
+                            # First try direct conversion (if pred_ts is already numeric)
+                            pred_ts_compare = float(pred_ts)
+                        except (ValueError, TypeError):
+                            # If that fails, pred_ts might be a datetime string
+                            # Convert to datetime then to Unix timestamp
+                            pred_ts_dt = pd.to_datetime(pred_ts)
+                            pred_ts_compare = pred_ts_dt.timestamp()
+                    else:
+                        # Observations are object/string - keep as-is
+                        pred_ts_compare = pred_ts
+                    next_obs = obs_df[obs_df['ts'] > pred_ts_compare]
+                except (ValueError, TypeError) as e:
+                    # If conversion fails, skip this prediction
+                    logger.warning(f"Timestamp comparison failed for prediction {idx}: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Unexpected error in accuracy calculation at {idx}: {e}")
+                    continue
                 if not next_obs.empty:
                     obs_value = float(next_obs.iloc[0]['value'])
                     error = pred_value - obs_value
@@ -1234,6 +1314,7 @@ def register_routes(app):
                     'accuracy_pct': round(accuracy_pct, 2)
                 }
 
+            logger.info(f"Returning performance data: {len(observations)} obs, {len(predictions)} preds, {len(accuracy_data)} accuracy points")
             return jsonify({
                 'observations': observations,
                 'predictions': predictions,
