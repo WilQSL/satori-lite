@@ -1459,7 +1459,31 @@
     async function loadPerformance() {
         try {
             const data = await apiCall('/engine/performance');
-            if (!data || data.error) return;
+
+            // Debug logging
+            console.log('Performance data received:', data);
+
+            if (!data || data.error) {
+                console.warn('No performance data or error:', data?.error);
+                // Show message to user
+                if (data?.error) {
+                    showToast('Performance data unavailable: ' + data.error, true);
+                }
+                return;
+            }
+
+            // Check if we have any data
+            const hasData = (data.observations && data.observations.length > 0) ||
+                           (data.predictions && data.predictions.length > 0);
+
+            if (!hasData) {
+                console.log('No observations or predictions yet');
+                // Update stats to show no data
+                document.getElementById('accuracyPct').textContent = '--';
+                document.getElementById('avgError').textContent = 'No data yet';
+                document.getElementById('avgAbsError').textContent = '--';
+                return;
+            }
 
             // Update stats
             if (data.stats) {
@@ -1471,35 +1495,115 @@
                     data.stats.avg_abs_error !== undefined ? data.stats.avg_abs_error.toFixed(2) : '--';
             }
 
-            renderPredVsObsChart(data.observations, data.predictions);
+            renderPredVsObsChart(data.observations, data.predictions, data.accuracy);
             renderAccuracyChart(data.accuracy);
         } catch (error) {
             console.error('Error loading performance data:', error);
+            showToast('Failed to load performance data', true);
         }
     }
 
-    function renderPredVsObsChart(observations, predictions) {
-        const ctx = document.getElementById('predVsObsChart');
-        if (!ctx) return;
+    function renderPredVsObsChart(observations, predictions, accuracyData) {
+        try {
+            const ctx = document.getElementById('predVsObsChart');
+            if (!ctx) {
+                console.error('Chart canvas element not found: predVsObsChart');
+                return;
+            }
 
-        if (predVsObsChart) predVsObsChart.destroy();
+            console.log('Rendering predictions vs observations chart:', {
+                observations: observations?.length,
+                predictions: predictions?.length
+            });
 
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const textColor = isDark ? '#a0a0a0' : '#555555';
-        const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+            // Debug: log sample data
+            if (observations?.length > 0) {
+                console.log('Sample observation:', observations[0]);
+            }
+            if (predictions?.length > 0) {
+                console.log('Sample prediction:', predictions[0]);
+            }
 
-        predVsObsChart = new Chart(ctx, {
+            if (predVsObsChart) predVsObsChart.destroy();
+
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const textColor = isDark ? '#a0a0a0' : '#555555';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+
+            // Helper function to parse timestamp (handles both Unix timestamps and date strings)
+            const parseTimestamp = (ts) => {
+                // Check if it's a pure numeric string (Unix timestamp)
+                if (/^\d+\.?\d*$/.test(ts)) {
+                    const numTs = parseFloat(ts);
+                    // Unix timestamp - multiply by 1000 if in seconds
+                    return numTs < 10000000000 ? new Date(numTs * 1000) : new Date(numTs);
+                } else {
+                    // Date string (like "2025-12-21 06:55:47.484299")
+                    // Add 'Z' to parse as UTC if not already present
+                    const dateStr = ts.includes('Z') ? ts : ts.replace(' ', 'T') + 'Z';
+                    return new Date(dateStr);
+                }
+            };
+
+            // Convert observations data - use sequential positions
+            const obsData = observations.map((o, i) => ({
+                x: i,  // Use index as x-position
+                y: parseFloat(o.value)
+            }));
+            console.log(`Mapped ${obsData.length} observation points, sample:`, obsData[0]);
+
+            // Convert predictions data - shift forward by 1 position
+            // prediction[i] should be at position i+1 to align with observation[i+1]
+            const predData = predictions.map((p, i) => ({
+                x: i + 1,  // Shift forward: pred[0] at position 1, pred[1] at position 2, etc.
+                y: parseFloat(p.value)
+            }));
+            console.log(`Mapped ${predData.length} prediction points, sample:`, predData[0]);
+
+            // Create index-based lookup maps
+            // observation[i] -> prediction[i+1] (observation produces next prediction)
+            // prediction[i] -> observation[i-1] (prediction was made from previous observation)
+            const obsToPredMap = new Map();
+            const predToObsMap = new Map();
+
+            // Build obsToPredMap: observation[i] maps to prediction[i+1]
+            observations.forEach((obs, i) => {
+                if (i + 1 < predictions.length) {
+                    const nextPred = predictions[i + 1];
+                    obsToPredMap.set(obs.ts, {
+                        ts: nextPred.ts,
+                        value: parseFloat(nextPred.value),
+                        timestamp: parseTimestamp(nextPred.ts)
+                    });
+                }
+                // First observation has no prediction to show (it produces the next one)
+            });
+
+            // Build predToObsMap: prediction[i] maps to observation[i-1]
+            predictions.forEach((pred, i) => {
+                if (i - 1 >= 0 && i - 1 < observations.length) {
+                    const prevObs = observations[i - 1];
+                    predToObsMap.set(pred.ts, {
+                        ts: prevObs.ts,
+                        value: parseFloat(prevObs.value),
+                        timestamp: parseTimestamp(prevObs.ts)
+                    });
+                }
+                // First prediction has no prior observation in our data
+            });
+
+            predVsObsChart = new Chart(ctx, {
             type: 'line',
             data: {
                 datasets: [{
                     label: 'Observations',
-                    data: observations.map(o => ({ x: new Date(o.ts), y: o.value })),
+                    data: obsData,
                     borderColor: 'rgb(75, 192, 192)',
                     borderWidth: 2,
                     pointRadius: 2
                 }, {
                     label: 'Predictions',
-                    data: predictions.map(p => ({ x: new Date(p.ts), y: p.value })),
+                    data: predData,
                     borderColor: 'rgb(153, 102, 255)',
                     borderWidth: 2,
                     pointRadius: 2
@@ -1510,8 +1614,20 @@
                 maintainAspectRatio: false,
                 scales: {
                     x: {
-                        type: 'time',
-                        ticks: { color: textColor },
+                        type: 'linear',
+                        ticks: {
+                            color: textColor,
+                            callback: function(value, index) {
+                                // Show timestamp labels for select points
+                                if (index >= observations.length - 3 || index === 0) {
+                                    const obs = observations[value];
+                                    if (obs) {
+                                        return new Date(parseTimestamp(obs.ts)).toLocaleTimeString();
+                                    }
+                                }
+                                return '';
+                            }
+                        },
                         grid: { color: gridColor }
                     },
                     y: {
@@ -1520,28 +1636,102 @@
                     }
                 },
                 plugins: {
-                    legend: { labels: { color: textColor } }
+                    legend: { labels: { color: textColor } },
+                    tooltip: {
+                        mode: 'point',
+                        intersect: false,
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                const index = Math.round(tooltipItems[0].parsed.x);
+                                const obs = observations[index];
+                                if (obs) {
+                                    return new Date(parseTimestamp(obs.ts)).toLocaleString();
+                                }
+                                return 'Index: ' + index;
+                            },
+                            label: function(context) {
+                                const datasetLabel = context.dataset.label;
+                                const value = context.parsed.y;
+                                const position = Math.round(context.parsed.x);
+
+                                if (datasetLabel === 'Observations') {
+                                    // observation is at position i
+                                    const obsData = observations[position];
+                                    if (!obsData) {
+                                        // No observation at this position (future prediction only)
+                                        return null;
+                                    }
+                                    const obsTime = new Date(parseTimestamp(obsData.ts)).toLocaleTimeString();
+                                    console.log(`Position ${position}: Observation[${position}] ts=${obsData.ts}, time=${obsTime}`);
+                                    return `Observation: ${value.toFixed(2)} (at ${obsTime})`;
+
+                                } else if (datasetLabel === 'Predictions') {
+                                    // prediction[i] is at position i+1, so prediction at position p is predictions[p-1]
+                                    const predIndex = position - 1;
+                                    if (predIndex < 0 || predIndex >= predictions.length) {
+                                        // No prediction at this position (first observation has no prediction)
+                                        return null;
+                                    }
+                                    const predData = predictions[predIndex];
+                                    if (!predData) {
+                                        return null;
+                                    }
+                                    const predTime = new Date(parseTimestamp(predData.ts)).toLocaleTimeString();
+                                    console.log(`Position ${position}: Prediction[${predIndex}] ts=${predData.ts}, time=${predTime}`);
+                                    return `Prediction: ${value.toFixed(2)} (at ${predTime})`;
+                                }
+
+                                return null;
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'point',
+                    intersect: false
                 }
             }
         });
+            console.log('Chart rendered successfully');
+        } catch (error) {
+            console.error('Error rendering predictions vs observations chart:', error);
+            showToast('Error rendering chart: ' + error.message, true);
+        }
     }
 
     function renderAccuracyChart(accuracyData) {
-        const ctx = document.getElementById('accuracyChart');
-        if (!ctx) return;
+        try {
+            const ctx = document.getElementById('accuracyChart');
+            if (!ctx) {
+                console.error('Chart canvas element not found: accuracyChart');
+                return;
+            }
 
-        if (accuracyChart) accuracyChart.destroy();
+            console.log('Rendering accuracy chart:', { dataPoints: accuracyData?.length });
+
+            if (accuracyChart) accuracyChart.destroy();
 
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
         const textColor = isDark ? '#a0a0a0' : '#555555';
         const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+
+        // Helper function to parse timestamp (same as in renderPredVsObsChart)
+        const parseTimestamp = (ts) => {
+            if (/^\d+\.?\d*$/.test(ts)) {
+                const numTs = parseFloat(ts);
+                return numTs < 10000000000 ? new Date(numTs * 1000) : new Date(numTs);
+            } else {
+                const dateStr = ts.includes('Z') ? ts : ts.replace(' ', 'T') + 'Z';
+                return new Date(dateStr);
+            }
+        };
 
         accuracyChart = new Chart(ctx, {
             type: 'line',
             data: {
                 datasets: [{
                     label: 'Absolute Error',
-                    data: accuracyData.map(a => ({ x: new Date(a.ts), y: a.abs_error })),
+                    data: accuracyData.map((a, i) => ({ x: i, y: a.abs_error })),
                     borderColor: 'rgb(255, 99, 132)',
                     backgroundColor: 'rgba(255, 99, 132, 0.1)',
                     borderWidth: 2,
@@ -1554,8 +1744,20 @@
                 maintainAspectRatio: false,
                 scales: {
                     x: {
-                        type: 'time',
-                        ticks: { color: textColor },
+                        type: 'linear',
+                        ticks: {
+                            color: textColor,
+                            callback: function(value, index) {
+                                // Show timestamp labels for select points
+                                if (index >= accuracyData.length - 3 || index === 0) {
+                                    const acc = accuracyData[value];
+                                    if (acc) {
+                                        return parseTimestamp(acc.ts).toLocaleTimeString();
+                                    }
+                                }
+                                return '';
+                            }
+                        },
                         grid: { color: gridColor }
                     },
                     y: {
@@ -1565,10 +1767,36 @@
                     }
                 },
                 plugins: {
-                    legend: { labels: { color: textColor } }
+                    legend: { labels: { color: textColor } },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                const index = Math.round(tooltipItems[0].parsed.x);
+                                const acc = accuracyData[index];
+                                if (acc) {
+                                    return parseTimestamp(acc.ts).toLocaleString();
+                                }
+                                return 'Index: ' + index;
+                            },
+                            label: function(context) {
+                                return 'Absolute Error: ' + context.parsed.y.toFixed(4);
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false
                 }
             }
         });
+            console.log('Accuracy chart rendered successfully');
+        } catch (error) {
+            console.error('Error rendering accuracy chart:', error);
+            showToast('Error rendering accuracy chart: ' + error.message, true);
+        }
     }
 
     function refreshPerformance() {
