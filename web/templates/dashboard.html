@@ -1460,11 +1460,7 @@
         try {
             const data = await apiCall('/engine/performance');
 
-            // Debug logging
-            console.log('Performance data received:', data);
-
             if (!data || data.error) {
-                console.warn('No performance data or error:', data?.error);
                 // Show message to user
                 if (data?.error) {
                     showToast('Performance data unavailable: ' + data.error, true);
@@ -1477,7 +1473,6 @@
                            (data.predictions && data.predictions.length > 0);
 
             if (!hasData) {
-                console.log('No observations or predictions yet');
                 // Update stats to show no data
                 document.getElementById('accuracyPct').textContent = '--';
                 document.getElementById('avgError').textContent = 'No data yet';
@@ -1511,19 +1506,6 @@
                 return;
             }
 
-            console.log('Rendering predictions vs observations chart:', {
-                observations: observations?.length,
-                predictions: predictions?.length
-            });
-
-            // Debug: log sample data
-            if (observations?.length > 0) {
-                console.log('Sample observation:', observations[0]);
-            }
-            if (predictions?.length > 0) {
-                console.log('Sample prediction:', predictions[0]);
-            }
-
             if (predVsObsChart) predVsObsChart.destroy();
 
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -1550,7 +1532,6 @@
                 x: i,  // Use index as x-position
                 y: parseFloat(o.value)
             }));
-            console.log(`Mapped ${obsData.length} observation points, sample:`, obsData[0]);
 
             // Convert predictions data - shift forward by 1 position
             // prediction[i] should be at position i+1 to align with observation[i+1]
@@ -1558,7 +1539,6 @@
                 x: i + 1,  // Shift forward: pred[0] at position 1, pred[1] at position 2, etc.
                 y: parseFloat(p.value)
             }));
-            console.log(`Mapped ${predData.length} prediction points, sample:`, predData[0]);
 
             // Create index-based lookup maps
             // observation[i] -> prediction[i+1] (observation produces next prediction)
@@ -1662,7 +1642,6 @@
                                         return null;
                                     }
                                     const obsTime = new Date(parseTimestamp(obsData.ts)).toLocaleTimeString();
-                                    console.log(`Position ${position}: Observation[${position}] ts=${obsData.ts}, time=${obsTime}`);
                                     return `Observation: ${value.toFixed(2)} (at ${obsTime})`;
 
                                 } else if (datasetLabel === 'Predictions') {
@@ -1677,7 +1656,6 @@
                                         return null;
                                     }
                                     const predTime = new Date(parseTimestamp(predData.ts)).toLocaleTimeString();
-                                    console.log(`Position ${position}: Prediction[${predIndex}] ts=${predData.ts}, time=${predTime}`);
                                     return `Prediction: ${value.toFixed(2)} (at ${predTime})`;
                                 }
 
@@ -1692,7 +1670,6 @@
                 }
             }
         });
-            console.log('Chart rendered successfully');
         } catch (error) {
             console.error('Error rendering predictions vs observations chart:', error);
             showToast('Error rendering chart: ' + error.message, true);
@@ -1706,8 +1683,6 @@
                 console.error('Chart canvas element not found: accuracyChart');
                 return;
             }
-
-            console.log('Rendering accuracy chart:', { dataPoints: accuracyData?.length });
 
             if (accuracyChart) accuracyChart.destroy();
 
@@ -1792,7 +1767,6 @@
                 }
             }
         });
-            console.log('Accuracy chart rendered successfully');
         } catch (error) {
             console.error('Error rendering accuracy chart:', error);
             showToast('Error rendering accuracy chart: ' + error.message, true);

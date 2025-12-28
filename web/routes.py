@@ -73,7 +73,6 @@ def set_startup(startup):
     """Set the startup instance (used by web routes to access AI engine, etc)."""
     global _startup_instance
     _startup_instance = startup
-    logger.info(f"set_startup called: {type(startup).__name__ if startup else 'None'}, has aiengine: {hasattr(startup, 'aiengine') if startup else False}")
 
 
 def get_startup():
@@ -1186,7 +1185,6 @@ def register_routes(app):
             - stats: {avg_error, avg_abs_error, accuracy_pct}
         """
         try:
-            logger.info("Performance endpoint called")
             # Use the stored startup instance instead of importing
             startup = get_startup()
             if startup is None or not hasattr(startup, 'aiengine') or startup.aiengine is None:
@@ -1205,9 +1203,7 @@ def register_routes(app):
 
             # Get last 100 observations
             obs_df = streamModel.storage.getStreamData(streamModel.streamUuid)
-            logger.info(f"Retrieved {len(obs_df)} observations")
             if obs_df.empty:
-                logger.info("No observations found, returning empty response")
                 return jsonify({
                     'observations': [],
                     'predictions': [],
@@ -1223,9 +1219,7 @@ def register_routes(app):
 
             # Get last 100 predictions
             pred_df = streamModel.storage.getPredictions(streamModel.predictionStreamUuid)
-            logger.info(f"Retrieved {len(pred_df)} predictions")
             if pred_df.empty:
-                logger.info("No predictions found, returning observations only")
                 return jsonify({
                     'observations': observations,
                     'predictions': [],
@@ -1242,10 +1236,6 @@ def register_routes(app):
             # Calculate accuracy: match each prediction to the next observation
             import pandas as pd
             accuracy_data = []
-
-            logger.info(f"Calculating accuracy for {len(pred_df)} predictions vs {len(obs_df)} observations")
-            logger.info(f"obs_df['ts'] dtype: {obs_df['ts'].dtype}")
-            logger.info(f"pred_df['ts'] dtype: {pred_df['ts'].dtype}")
 
             for idx, pred_row in pred_df.iterrows():
                 pred_ts = pred_row['ts']
@@ -1314,7 +1304,6 @@ def register_routes(app):
                     'accuracy_pct': round(accuracy_pct, 2)
                 }
 
-            logger.info(f"Returning performance data: {len(observations)} obs, {len(predictions)} preds, {len(accuracy_data)} accuracy points")
             return jsonify({
                 'observations': observations,
                 'predictions': predictions,
