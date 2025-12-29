@@ -34,7 +34,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def create(
         cls,
         *args,
-        env: str = 'dev',
+        env: str = 'prod',
         runMode: str = None,
         isDebug: bool = False,
     ) -> 'StartupDag':
@@ -67,7 +67,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
         self.latestObservationTime: float = 0
         self.configRewardAddress: str = None
-        self.setRewardAddress()
         self.setupWalletManager()
         # Health check thread: monitors observations and restarts if none received in 24 hours
         self.checkinCheckThread = threading.Thread(
@@ -340,13 +339,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if self.walletOnlyMode:
             self.createServerConn()
             self.authWithCentral()
+            self.setRewardAddress(globally=True)  # Sync reward address with server
             logging.info("in WALLETONLYMODE")
+            startWebUI(self, port=self.uiPort)  # Start web UI after sync
             return
         self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
+        self.setRewardAddress(globally=True)  # Sync reward address with server
         self.setupDefaultStream()
         self.spawnEngine()
+        startWebUI(self, port=self.uiPort)  # Start web UI after sync
 
     def startWalletOnly(self):
         """start the satori engine."""
@@ -368,8 +371,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
+        self.setRewardAddress(globally=True)  # Sync reward address with server
         self.setupDefaultStream()
         self.spawnEngine()
+        startWebUI(self, port=self.uiPort)  # Start web UI after sync
         threading.Event().wait()
 
     def serverConnectedRecently(self, threshold_minutes: int = 10) -> bool:
@@ -425,20 +430,66 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         address: Union[str, None] = None,
         globally: bool = False
     ) -> bool:
+        """
+        Set or sync reward address between local config and central server.
+
+        Args:
+            address: Reward address to set. If None, loads from config or syncs from server.
+            globally: If True, also syncs with central server (requires production env).
+
+        Returns:
+            True if successfully set/synced, False otherwise.
+        """
+        # If address is provided, validate and save to config
         if EvrmoreWallet.addressIsValid(address):
             self.configRewardAddress = address
             config.add(data={'reward address': address})
-            if not globally:
-                return True
-        else:
-            self.configRewardAddress: str = str(config.get().get('reward address', ''))
-        if (
-            globally and
-            self.env in ['prod', 'local', 'testprod'] and
-            EvrmoreWallet.addressIsValid(self.configRewardAddress)
-        ):
-            self.server.setRewardAddress(address=self.configRewardAddress)
+
+            # If globally=True, check if server needs update
+            if globally and self.env in ['prod', 'local', 'testprod', 'dev']:
+                try:
+                    serverAddress = self.server.mineToAddressStatus()
+                    # Only send to server if addresses differ
+                    if address != serverAddress:
+                        self.server.setRewardAddress(address=address)
+                        logging.info(f"Updated server reward address: {address[:8]}...", color="green")
+                except Exception as e:
+                    logging.debug(f"Could not sync reward address with server: {e}")
             return True
+        else:
+            # No address provided - load from config
+            self.configRewardAddress: str = str(config.get().get('reward address', ''))
+
+            # If we need to sync with server, check if addresses match
+            if (
+                hasattr(self, 'server') and
+                self.server is not None and
+                self.env in ['prod', 'local', 'testprod', 'dev']
+            ):
+                try:
+                    serverAddress = self.server.mineToAddressStatus()
+
+                    # If config is empty but server has address, fetch and save
+                    if not self.configRewardAddress and serverAddress and EvrmoreWallet.addressIsValid(serverAddress):
+                        self.configRewardAddress = serverAddress
+                        config.add(data={'reward address': serverAddress})
+                        logging.info(f"Synced reward address from server: {serverAddress[:8]}...", color="green")
+                        return True
+
+                    # If config has address and globally=True, check if server needs update
+                    if (
+                        globally and
+                        EvrmoreWallet.addressIsValid(self.configRewardAddress) and
+                        self.configRewardAddress != serverAddress
+                    ):
+                        # Only send to server if addresses differ
+                        self.server.setRewardAddress(address=self.configRewardAddress)
+                        logging.info(f"Updated server reward address: {self.configRewardAddress[:8]}...", color="green")
+                        return True
+
+                except Exception as e:
+                    logging.debug(f"Could not sync reward address with server: {e}")
+
         return False
 
     @staticmethod
@@ -526,14 +577,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.pollObservationsForever()
 
             logging.info("AI Engine spawned successfully", color="green")
-
-            # Now that engine is ready, update web routes with startup instance
-            try:
-                from web.routes import set_startup
-                set_startup(self)
-                logging.info("Web routes updated with startup instance", color="green")
-            except Exception as e:
-                logging.warning(f"Could not update web routes with startup: {e}")
         except Exception as e:
             logging.error(f"Failed to spawn AI Engine: {e}")
 
@@ -597,9 +640,9 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601)
 
         app = create_app()
 
-        # Connect vault to web routes
+        # Connect vault and startup to web routes
         set_vault(startupDag.walletManager)
-        # Note: set_startup() will be called after AI engine is spawned
+        set_startup(startupDag)  # Set startup immediately - initialization is complete
 
         def run_flask():
             # Suppress Flask/werkzeug logging
@@ -624,30 +667,8 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601)
 if __name__ == "__main__":
     logging.info("Starting Satori Neuron", color="green")
 
-    # Start web UI early (before blocking server connection)
-    def start_web_early():
-        """Poll for StartupDag singleton and start web UI when ready."""
-        import time
-        max_wait = 30  # Maximum 30 seconds
-        start_time = time.time()
-
-        while time.time() - start_time < max_wait:
-            # Check if singleton instance exists
-            if StartupDag in SingletonMeta._instances:
-                try:
-                    startup = StartupDag()
-                    startWebUI(startup, port=startup.uiPort)
-                    return
-                except Exception as e:
-                    logging.warning(f"Web UI start failed: {e}")
-                    return
-            time.sleep(0.5)  # Poll every 500ms
-
-        logging.warning("StartupDag not initialized within timeout, skipping web UI")
-
-    web_early_thread = threading.Thread(target=start_web_early, daemon=True)
-    web_early_thread.start()
-
+    # Web UI will be started after initialization completes
+    # (called from start() or startWorker() methods after reward address sync)
     startup = StartupDag.create(env=os.environ.get('SATORI_ENV', 'prod'), runMode='worker')
 
     threading.Event().wait()

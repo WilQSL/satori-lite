@@ -685,8 +685,18 @@
             showToast('Invalid address: must start with E and be 34 characters', true);
             return;
         }
+
+        // Check if same as current address
+        const currentAddress = document.getElementById('currentRewardAddress').value;
+        if (address === currentAddress) {
+            showToast('This reward address is already set', true);
+            document.getElementById('newRewardAddress').value = '';
+            return;
+        }
+
+        // Backend handles server sync
         const result = await apiCall('/peer/reward-address', 'POST', { reward_address: address });
-        if (result) {
+        if (result && result.success) {
             showToast('Reward address updated');
             loadRewardAddress();
             document.getElementById('newRewardAddress').value = '';

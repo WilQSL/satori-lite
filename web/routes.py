@@ -704,10 +704,43 @@ def register_routes(app):
     @app.route('/api/peer/reward-address', methods=['GET', 'POST'])
     @login_required
     def api_reward_address():
-        """Proxy reward address request."""
+        """
+        Get or set reward address using local config (synced with server by start.py).
+
+        GET: Reads from local config (fast, no server call)
+        POST: Updates both local config and server (via setRewardAddress)
+        """
+        startup = get_startup()
+
         if request.method == 'POST':
-            return proxy_api('/peer/reward-address', 'POST', request.json)
-        return proxy_api('/peer/reward-address')
+            # Get the new reward address from request
+            data = request.get_json()
+            if not data or 'reward_address' not in data:
+                return jsonify({'error': 'Missing reward_address'}), 400
+
+            new_address = data['reward_address']
+
+            # Update both local config and server using setRewardAddress
+            if startup:
+                try:
+                    success = startup.setRewardAddress(address=new_address, globally=True)
+                    if success:
+                        return jsonify({'success': True, 'reward_address': new_address})
+                    else:
+                        return jsonify({'error': 'Failed to set reward address'}), 500
+                except Exception as e:
+                    logger.error(f"Error setting reward address: {e}")
+                    return jsonify({'error': str(e)}), 500
+            else:
+                # Fallback to proxy if startup not available
+                return proxy_api('/peer/reward-address', 'POST', request.json)
+
+        # GET request - read from local config
+        if startup and hasattr(startup, 'configRewardAddress'):
+            return jsonify({'reward_address': startup.configRewardAddress or ''})
+        else:
+            # Fallback to proxy if startup not available
+            return proxy_api('/peer/reward-address')
 
     @app.route('/api/lender/status')
     @login_required

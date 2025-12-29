@@ -423,18 +423,17 @@ class SatoriServerClient(object):
             raise Exception(f'Unable to connect to central-lite server: {e}')
 
     def checkinCheck(self) -> bool:
-        """Check if there are updates since last checkin."""
-        # For central-lite, always return False (no stream updates)
+        """Check if there are updates since last checkin. Returns True if health check fails."""
         try:
             health_response = requests.get(self.url + '/health')
             if health_response.status_code == 200:
-                return False  # central-lite doesn't have stream updates
+                return False  # healthy - no restart needed
             else:
                 logging.warning(f'central-lite health check returned status {health_response.status_code}')
-                return False
+                return True  # unhealthy - trigger restart
         except Exception as e:
             logging.warning(f'central-lite health check failed in checkinCheck: {e}')
-            return False
+            return True  # failed - trigger restart
 
     def requestSimplePartial(self, network: str):
         ''' sends a satori partial transaction to the server '''
@@ -831,21 +830,23 @@ class SatoriServerClient(object):
         return False, ''
 
     def mineToAddressStatus(self) -> Union[str, None]:
-        ''' get reward address '''
+        ''' get reward address from central server using v1 API '''
         try:
             response = self._makeAuthenticatedCall(
                 function=requests.get,
-                endpoint='/mine/to/address')
+                endpoint='/api/v1/peer/reward-address')
             if response.status_code > 399:
-                return 'Unknown'
-            if response.text in ['null', 'None', 'NULL']:
+                return None
+            # Parse JSON response
+            data = response.json()
+            reward_address = data.get('reward_address', '')
+            if not reward_address or reward_address in ['null', 'None', 'NULL']:
                 return ''
-            return response.text
+            return reward_address
         except Exception as e:
             logging.warning(
                 'unable to get reward address; try again Later.', e, color='yellow')
             return None
-        return None
 
     def setRewardAddress(
         self,
