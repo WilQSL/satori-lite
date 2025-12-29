@@ -9,19 +9,12 @@ from satorilib.concepts import constants
 from satorilib.wallet import EvrmoreWallet
 from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
-from satorineuron import VERSION
 from satorineuron import logging
 from satorineuron import config
-from satorineuron.init.tag import LatestTag, Version
 from satorineuron.init.wallet import WalletManager
 from satorineuron.structs.start import RunMode, StartupDagStruct
 # from satorilib.utils.ip import getPublicIpv4UsingCurl  # Removed - not needed
 from satoriengine.veda.engine import Engine
-
-
-def getStart():
-    """returns StartupDag singleton"""
-    return StartupDag()
 
 
 class SingletonMeta(type):
@@ -36,17 +29,12 @@ class SingletonMeta(type):
 class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     """a DAG of startup tasks."""
 
-    _holdingBalanceBase_cache = None
-    _holdingBalanceBase_timestamp = 0
-
     @classmethod
     def create(
         cls,
         *args,
         env: str = 'dev',
         runMode: str = None,
-        urlServer: str = None,
-        urlMundo: str = None,
         isDebug: bool = False,
     ) -> 'StartupDag':
         '''Factory method to create and initialize StartupDag'''
@@ -54,8 +42,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             *args,
             env=env,
             runMode=runMode,
-            urlServer=urlServer,
-            urlMundo=urlMundo,
             isDebug=isDebug)
         startupDag.startFunction()
         return startupDag
@@ -65,13 +51,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         *args,
         env: str = 'dev',
         runMode: str = None,
-        urlServer: str = None,
-        urlMundo: str = None,
         isDebug: bool = False,
     ):
         super(StartupDag, self).__init__(*args)
         self.needsRestart: Union[str, None] = None
-        self.version = Version(VERSION)
         self.env = env
         self.runMode = RunMode.choose(runMode or config.get().get('mode', None))
         # logging.debug(f'mode: {self.runMode.name}', print=True)
@@ -81,8 +64,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.userInteraction = time.time()
         self.walletManager: WalletManager
         self.isDebug: bool = isDebug
-        self.urlServer: str = urlServer
-        self.urlMundo: str = urlMundo
+        self.urlServer: str = None
+        self.urlMundo: str = None
         self.paused: bool = False
         self.pauseThread: Union[threading.Thread, None] = None
         self.balances: dict = {}
@@ -245,38 +228,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     def electrumxCheck(self):
         return self.walletManager.isConnected()
-
-    def watchForVersionUpdates(self):
-        """
-        if we notice the code version has updated, download code restart
-        in order to restart we have to kill the main thread manually.
-        """
-
-        def getPidByName(name: str) -> Union[int, None]:
-            import psutil
-            for proc in psutil.process_iter(["pid", "cmdline"]):
-                try:
-                    if name in " ".join(proc.info["cmdline"]):
-                        return proc.info["pid"]
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            return None
-
-        def terminatePid(pid: int):
-            import signal
-            os.kill(pid, signal.SIGTERM)
-
-        def watchForever():
-            latestTag = LatestTag(self.version, serverURL=self.urlServer)
-            while True:
-                time.sleep(60 * 60 * 24)
-                if latestTag.mustUpdate():
-                    terminatePid(getPidByName("satori.py"))
-
-        self.watchVersionThread = threading.Thread(
-            target=watchForever,
-            daemon=True)
-        self.watchVersionThread.start()
 
     def pollObservationsForever(self):
         """
@@ -702,7 +653,7 @@ if __name__ == "__main__":
         import time
         time.sleep(2)  # Wait for StartupDag to be created
         try:
-            startup = getStart()
+            startup = StartupDag()
             startWebUI(startup, port=startup.uiPort)
         except Exception as e:
             logging.warning(f"Early web UI start failed: {e}")
