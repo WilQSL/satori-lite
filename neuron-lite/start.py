@@ -61,7 +61,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.walletManager: WalletManager
         self.isDebug: bool = isDebug
         self.balances: dict = {}
-        # Central-lite only needs basic fields - no subscriptions/publications/keys
         self.aiengine: Union[Engine, None] = None
         self.publications: list[Stream] = []  # Keep for engine
         self.subscriptions: list[Stream] = []  # Keep for engine
@@ -70,11 +69,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.configRewardAddress: str = None
         self.setRewardAddress()
         self.setupWalletManager()
-        # Disabled: checkinCheck thread makes unnecessary health check requests every 6 hours
-        # self.checkinCheckThread = threading.Thread(
-        #     target=self.checkinCheck,
-        #     daemon=True)
-        # self.checkinCheckThread.start()
+        # Health check thread: monitors observations and restarts if none received in 24 hours
+        self.checkinCheckThread = threading.Thread(
+            target=self.checkinCheck,
+            daemon=True)
+        self.checkinCheckThread.start()
         alreadySetup: bool = os.path.exists(config.walletPath("wallet.yaml"))
         if not alreadySetup:
             threading.Thread(target=self.delayedEngine).start()
@@ -242,8 +241,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         import random
 
         def pollForever():
-            # First poll: random delay between 0 and 11 hours
-            initial_delay = random.randint(0, 60 * 60 * 11)
+            # First poll: random delay between 1 and 11 hours
+            initial_delay = random.randint(60 * 60, 60 * 60 * 11)
             logging.info(f"First observation poll in {initial_delay / 3600:.1f} hours", color='blue')
             time.sleep(initial_delay)
 
@@ -285,6 +284,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         'hash': hash_val,
                     }])
 
+                    # Update last observation time
+                    self.latestObservationTime = time.time()
+
                     # Pass to each stream in the engine
                     for streamUuid, streamModel in self.aiengine.streamModels.items():
                         try:
@@ -310,13 +312,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     def checkinCheck(self):
         while True:
-            time.sleep(60 * 60 * 6)
+            time.sleep(60 * 60 * 6)  # Check every 6 hours
             current_time = time.time()
-            if self.latestObservationTime and (current_time - self.latestObservationTime > 60*60*6):
-                logging.warning("No observations in 6 hours, restarting")
+            if self.latestObservationTime and (current_time - self.latestObservationTime > 60*60*24):
+                logging.warning("No observations in 24 hours, restarting", print=True)
                 self.triggerRestart()
             if hasattr(self, 'server') and hasattr(self.server, 'checkinCheck') and self.server.checkinCheck():
-                logging.warning("Server check failed, restarting")
+                logging.warning("Server check failed, restarting", print=True)
                 self.triggerRestart()
 
     def networkIsTest(self, network: str = None) -> bool:
@@ -384,9 +386,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     def createServerConn(self):
         # logging.debug(self.urlServer, color="teal")
-        self.server = SatoriServerClient(
-            self.wallet, url=None, sendingUrl=None
-        )
+        self.server = SatoriServerClient(self.wallet)
 
     def authWithCentral(self):
         """Register peer with central-lite server."""
