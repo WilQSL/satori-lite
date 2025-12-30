@@ -664,6 +664,15 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601)
         return None
 
 
+def getStart() -> Union[StartupDag, None]:
+    """Get the singleton instance of StartupDag.
+
+    Returns:
+        The singleton StartupDag instance if it exists, None otherwise.
+    """
+    return StartupDag._instances.get(StartupDag, None)
+
+
 if __name__ == "__main__":
     logging.info("Starting Satori Neuron", color="green")
 

@@ -96,7 +96,7 @@ def path(of='data'):
 
 
 # Central server URL - single source of truth
-DEFAULT_CENTRAL_URL = 'http://137.184.38.13:8000'
+DEFAULT_CENTRAL_URL = 'https://network.satorinet.io'
 
 
 def get_central_url() -> str:
