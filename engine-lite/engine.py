@@ -6,6 +6,7 @@ import copy
 import asyncio
 import warnings
 import threading
+import hashlib
 import numpy as np
 import pandas as pd
 from satorilib.concepts import Observation, Stream
@@ -906,6 +907,31 @@ class StreamModel:
         except Exception as e:
             error(f"Error publishing prediction to Central Server: {e}")
 
+    def _createAugmentedData(self, firstForecast: pd.DataFrame) -> pd.DataFrame:
+        try:
+            firstValue = StreamForecast.firstPredictionOf(firstForecast)
+            if 'date_time' in firstForecast.columns:
+                timestamp = firstForecast['date_time'].iloc[0]
+            elif 'ds' in firstForecast.columns:
+                timestamp = firstForecast['ds'].iloc[0]
+            else:
+                timestamp = now()
+
+            tempHash = hashlib.sha256(
+                f"{firstValue}{timestamp}".encode()
+            ).hexdigest()[:16]
+
+            tempRow = pd.DataFrame({
+                'date_time': [timestamp],
+                'value': [firstValue],
+                'id': [tempHash]
+            })
+            return pd.concat([self.data, tempRow], ignore_index=True)
+
+        except Exception as e:
+            error(f"Error creating augmented data for autoregression: {e}")
+            return self.data
+
     def producePrediction(self, updatedModel=None):
         """
         triggered by
@@ -915,7 +941,29 @@ class StreamModel:
         try:
             model = updatedModel or self.stable
             if model is not None:
-                forecast = model.predict(data=self.data)
+                firstForecast = model.predict(data=self.data)
+
+                # Only do autoregression if first prediction is valid
+                if isinstance(firstForecast, pd.DataFrame):
+                    firstValue = StreamForecast.firstPredictionOf(firstForecast)
+                    debug(f"[AUTOREGRESSION] First prediction: {firstValue}", color='cyan')
+
+                    augmentedData = self._createAugmentedData(firstForecast)
+                    debug(f"[AUTOREGRESSION] Augmented data size: {len(augmentedData)} rows (original: {len(self.data)})", color='cyan')
+
+                    secondForecast = model.predict(data=augmentedData)
+                    if isinstance(secondForecast, pd.DataFrame):
+                        secondValue = StreamForecast.firstPredictionOf(secondForecast)
+                        debug(f"[AUTOREGRESSION] Second prediction (sent to server): {secondValue}", color='cyan')
+                    else:
+                        secondForecast = None
+
+                    forecast = secondForecast if secondForecast is not None else firstForecast
+                else:
+                    # First prediction failed, skip autoregression
+                    debug("[AUTOREGRESSION] Skipping - first prediction failed", color='yellow')
+                    forecast = firstForecast
+
                 if isinstance(forecast, pd.DataFrame):
                     # Use Unix timestamp for consistency with observation storage
                     predictionDf = pd.DataFrame({ 'value': [StreamForecast.firstPredictionOf(forecast)]
