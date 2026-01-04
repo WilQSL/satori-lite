@@ -258,41 +258,73 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         time.sleep(60 * 60 * 11)
                         continue
 
-                    # Get latest observation from central-lite
-                    observation = self.server.getObservation()
+                    # Get latest batch of observations from central-lite
+                    # This includes Bitcoin, multi-crypto, and SafeTrade observations
+                    storage = getattr(self.aiengine, 'storage', None)
+                    observations = self.server.getObservationsBatch(storage=storage)
 
-                    if observation is None:
+                    if observations is None or len(observations) == 0:
                         logging.info("No new observations available", color='blue')
                         time.sleep(60 * 60 * 11)
                         continue
 
-                    # Convert observation to DataFrame for engine
-                    # Expected format: columns = [ts, value, hash/id]
-                    value = observation.get('value') or observation.get('bitcoin_price')
-                    timestamp = observation.get('observed_at') or observation.get('ts')
-
-                    # Generate proper cryptographic hash (matches prediction format)
-                    # Use sha256 hash like predictions do (engine.py:873-875)
-                    hash_val = hashlib.sha256(
-                        f"{value}{timestamp}".encode()
-                    ).hexdigest()[:16]
-
-                    df = pd.DataFrame([{
-                        'ts': timestamp,
-                        'value': float(value) if value is not None else None,
-                        'hash': hash_val,
-                    }])
+                    logging.info(f"Received {len(observations)} observations from server", color='cyan')
 
                     # Update last observation time
                     self.latestObservationTime = time.time()
 
-                    # Pass to each stream in the engine
-                    for streamUuid, streamModel in self.aiengine.streamModels.items():
+                    # Process each observation
+                    observations_processed = 0
+                    for observation in observations:
                         try:
-                            logging.info(f"Passing observation to stream {streamUuid}", color='green')
-                            streamModel.onDataReceived(df)
+                            # Extract values
+                            value = observation.get('value')
+                            hash_val = observation.get('hash') or observation.get('id')
+                            stream_uuid = observation.get('stream_uuid')
+                            stream_name = observation.get('stream', {}).get('name', 'unknown')
+
+                            if value is None:
+                                logging.warning(f"Skipping observation with no value (stream: {stream_name})", color='yellow')
+                                continue
+
+                            # Convert observation to DataFrame for engine
+                            df = pd.DataFrame([{
+                                'ts': observation.get('observed_at') or observation.get('ts'),
+                                'value': float(value),
+                                'hash': str(hash_val) if hash_val is not None else None,
+                            }])
+
+                            # Store using server-provided stream UUID
+                            if stream_uuid:
+                                # Store observation in stream-specific table
+                                if storage:
+                                    try:
+                                        timestamp = observation.get('observed_at') or observation.get('ts')
+                                        storage.storeStreamObservation(
+                                            streamUuid=stream_uuid,
+                                            timestamp=timestamp,
+                                            value=str(value),
+                                            hash_val=str(hash_val) if hash_val else '',
+                                            provider='central'
+                                        )
+                                        observations_processed += 1
+                                        logging.info(f"✓ Stored {stream_name}: ${float(value):,.2f} (UUID: {stream_uuid[:8]}...)", color='green')
+                                    except Exception as e:
+                                        logging.error(f"Error storing observation for {stream_name}: {e}", color='red')
+
+                                # Pass to engine if stream model exists
+                                if stream_uuid in self.aiengine.streamModels:
+                                    try:
+                                        self.aiengine.streamModels[stream_uuid].onDataReceived(df)
+                                    except Exception as e:
+                                        logging.error(f"Error passing to engine for {stream_name}: {e}", color='red')
+                            else:
+                                logging.warning(f"Observation for {stream_name} missing stream_uuid", color='yellow')
+
                         except Exception as e:
-                            logging.error(f"Error passing observation to stream {streamUuid}: {e}", color='red')
+                            logging.error(f"Error processing individual observation: {e}", color='red')
+
+                    logging.info(f"✓ Processed and stored {observations_processed}/{len(observations)} observations", color='cyan')
 
                 except Exception as e:
                     logging.error(f"Error polling observations: {e}", color='red')

@@ -292,3 +292,174 @@ class EngineSqliteDatabase:
         return hashlib.blake2s(
             string.encode(),
             digest_size=8).hexdigest()
+
+    # ==================== Streams Metadata Methods ====================
+
+    def createStreamsTable(self):
+        """Create the streams metadata table if it doesn't exist."""
+        try:
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS streams (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_stream_id INTEGER,
+                    uuid TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    secondary TEXT,
+                    target TEXT,
+                    meta TEXT,
+                    description TEXT,
+                    last_synced TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            ''')
+            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_streams_uuid ON streams(uuid)')
+            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_streams_name ON streams(name)')
+            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_streams_server_id ON streams(server_stream_id)')
+            self.conn.commit()
+            debug("Engine DB: Created/verified streams metadata table")
+        except Exception as e:
+            error(f"Engine DB: Error creating streams table: {e}")
+
+    def upsertStream(
+        self,
+        uuid: str,
+        server_stream_id: Optional[int] = None,
+        name: Optional[str] = None,
+        secondary: Optional[str] = None,
+        target: Optional[str] = None,
+        meta: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> bool:
+        """
+        Insert or update stream metadata.
+
+        Args:
+            uuid: Stream UUID (required, unique)
+            server_stream_id: Stream ID from central server
+            name: Human-readable stream name
+            secondary: Secondary identifier
+            target: Target field for StreamId compatibility
+            meta: Metadata field
+            description: Stream description
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Ensure streams table exists
+            self.createStreamsTable()
+
+            # Get current timestamp for last_synced
+            from datetime import datetime
+            last_synced = datetime.utcnow().isoformat()
+
+            # Use INSERT OR REPLACE to upsert
+            self.cursor.execute('''
+                INSERT OR REPLACE INTO streams
+                (uuid, server_stream_id, name, secondary, target, meta, description, last_synced)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (uuid, server_stream_id, name, secondary, target, meta, description, last_synced))
+            self.conn.commit()
+            debug(f"Engine DB: Upserted stream metadata for {uuid} (name: {name})")
+            return True
+        except Exception as e:
+            error(f"Engine DB: Error upserting stream {uuid}: {e}")
+            return False
+
+    def getStreamByUuid(self, uuid: str) -> Optional[dict]:
+        """
+        Get stream metadata by UUID.
+
+        Returns:
+            Dict with stream info or None if not found
+        """
+        try:
+            self.cursor.execute(
+                '''SELECT id, server_stream_id, uuid, name, secondary, target, meta, description, last_synced, created_at
+                FROM streams WHERE uuid = ?''', (uuid,))
+            row = self.cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'server_stream_id': row[1],
+                    'uuid': row[2],
+                    'name': row[3],
+                    'secondary': row[4],
+                    'target': row[5],
+                    'meta': row[6],
+                    'description': row[7],
+                    'last_synced': row[8],
+                    'created_at': row[9]
+                }
+            return None
+        except Exception as e:
+            error(f"Engine DB: Error getting stream by uuid {uuid}: {e}")
+            return None
+
+    def getStreamByName(self, name: str) -> Optional[dict]:
+        """
+        Get stream metadata by name.
+
+        Returns:
+            Dict with stream info or None if not found
+        """
+        try:
+            self.cursor.execute(
+                '''SELECT id, server_stream_id, uuid, name, secondary, target, meta, description, last_synced, created_at
+                FROM streams WHERE name = ?''', (name,))
+            row = self.cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'server_stream_id': row[1],
+                    'uuid': row[2],
+                    'name': row[3],
+                    'secondary': row[4],
+                    'target': row[5],
+                    'meta': row[6],
+                    'description': row[7],
+                    'last_synced': row[8],
+                    'created_at': row[9]
+                }
+            return None
+        except Exception as e:
+            error(f"Engine DB: Error getting stream by name {name}: {e}")
+            return None
+
+    def getAllStreams(self) -> list:
+        """
+        Get all streams metadata.
+
+        Returns:
+            List of dicts with stream info
+        """
+        try:
+            self.cursor.execute(
+                '''SELECT id, server_stream_id, uuid, name, secondary, target, meta, description, last_synced, created_at
+                FROM streams ORDER BY created_at DESC''')
+            rows = self.cursor.fetchall()
+            return [{
+                'id': row[0],
+                'server_stream_id': row[1],
+                'uuid': row[2],
+                'name': row[3],
+                'secondary': row[4],
+                'target': row[5],
+                'meta': row[6],
+                'description': row[7],
+                'last_synced': row[8],
+                'created_at': row[9]
+            } for row in rows]
+        except Exception as e:
+            error(f"Engine DB: Error getting all streams: {e}")
+            return []
+
+    def getStreamUuidByName(self, name: str) -> Optional[str]:
+        """
+        Get stream UUID by name (convenience method).
+
+        Returns:
+            UUID string or None if not found
+        """
+        stream = self.getStreamByName(name)
+        return stream['uuid'] if stream else None

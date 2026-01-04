@@ -1190,16 +1190,92 @@ class SatoriServerClient(object):
             return None
         return True
 
-    def getObservation(self, stream: str = 'bitcoin') -> Union[dict, None]:
+    def getObservationsBatch(self, storage=None, limit: int = 100) -> Union[list, None]:
+        """
+        Get the latest batch of observations from the Central Server.
+
+        This retrieves all observations from the most recent daily run, including:
+        - Multi-crypto observations (btc, eth, doge, etc.)
+        - SafeTrade observations (safetrade_btc, etc.)
+        - Bitcoin observation (bitcoin)
+
+        Args:
+            storage: Optional storage manager for storing stream metadata
+            limit: Maximum number of observations to return (default: 100)
+
+        Returns:
+            List of observation dicts with stream_uuid added, or None if request fails
+        """
+        try:
+            # Call new batch endpoint
+            response = self._makeAuthenticatedCall(
+                function=requests.get,
+                endpoint=f'/api/v1/observations/batch?limit={limit}',
+                raiseForStatus=False
+            )
+            if response.status_code == 200:
+                observations = response.json()
+                if observations is None:
+                    return None
+
+                # Process each observation to extract and store stream metadata
+                processed_observations = []
+                for data in observations:
+                    # Extract and store stream metadata if present
+                    if data.get('stream'):
+                        stream_info = data['stream']
+                        stream_uuid = stream_info.get('uuid')
+
+                        if stream_uuid and storage and hasattr(storage, 'db'):
+                            # Store stream metadata in client's streams table
+                            try:
+                                storage.db.upsertStream(
+                                    uuid=stream_uuid,
+                                    server_stream_id=stream_info.get('id'),
+                                    name=stream_info.get('name'),
+                                    secondary=stream_info.get('secondary'),
+                                    target=stream_info.get('target'),
+                                    meta=stream_info.get('meta'),
+                                    description=stream_info.get('description')
+                                )
+                                # Add stream_uuid to observation for easy access
+                                data['stream_uuid'] = stream_uuid
+                            except Exception as e:
+                                logging.warning(
+                                    f"Failed to store stream metadata for {stream_info.get('name')}: {e}",
+                                    color='yellow')
+
+                    processed_observations.append(data)
+
+                if processed_observations:
+                    logging.info(
+                        f"Retrieved {len(processed_observations)} observations from latest batch",
+                        color='green')
+
+                return processed_observations
+            else:
+                logging.warning(
+                    f"Failed to get observations batch. Status code: {response.status_code}",
+                    color='yellow')
+                return None
+        except Exception as e:
+            logging.error(
+                f"Error occurred while fetching observations batch: {str(e)}",
+                color='red')
+            return None
+
+    def getObservation(self, stream: str = 'bitcoin', storage=None) -> Union[dict, None]:
         """
         Get the latest observation from the Central Server.
 
         Args:
             stream: The stream/topic to get observations for (default: 'bitcoin')
                     NOTE: This is a temporary testing endpoint - will be updated later
+            storage: Optional storage manager for storing stream metadata
 
         Returns:
-            dict with keys: observation_id, value, observed_at, ts, bitcoin_price, sources
+            dict with keys: observation_id, value, observed_at, ts, bitcoin_price, sources,
+                           stream_uuid (if stream metadata is present)
             None if request fails or no observation available
         """
         try:
@@ -1213,6 +1289,34 @@ class SatoriServerClient(object):
                 data = response.json()
                 if data is None:
                     return None
+
+                # Extract and store stream metadata if present
+                if data.get('stream'):
+                    stream_info = data['stream']
+                    stream_uuid = stream_info.get('uuid')
+
+                    if stream_uuid and storage and hasattr(storage, 'db'):
+                        # Store stream metadata in client's streams table
+                        try:
+                            storage.db.upsertStream(
+                                uuid=stream_uuid,
+                                server_stream_id=stream_info.get('id'),
+                                name=stream_info.get('name'),
+                                secondary=stream_info.get('secondary'),
+                                target=stream_info.get('target'),
+                                meta=stream_info.get('meta'),
+                                description=stream_info.get('description')
+                            )
+                            # Add stream_uuid to response for easy access
+                            data['stream_uuid'] = stream_uuid
+                            logging.info(
+                                f"Stored stream metadata for '{stream_info.get('name')}' (UUID: {stream_uuid})",
+                                color='green')
+                        except Exception as e:
+                            logging.warning(
+                                f"Failed to store stream metadata: {e}",
+                                color='yellow')
+
                 return data
             else:
                 logging.warning(
