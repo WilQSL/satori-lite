@@ -230,6 +230,49 @@
             </div>
         </div>
 
+        <!-- Burn Address for Reverse Bridge Section -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">local_fire_department</i>
+                        Burn Address for Reverse Bridge
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">
+                        Send SATORI tokens on Base chain to this address to bridge them back to Evrmore
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label">Base Chain Burn Address</label>
+                        <div class="input-group">
+                            {% if eth_wallet_address %}
+                            <input type="text" class="form-control" id="burnAddress" readonly value="{{ eth_wallet_address }}">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('burnAddress')" title="Copy burn address">
+                                <i class="material-icons align-middle">content_copy</i>
+                            </button>
+                            {% else %}
+                            <input type="text" class="form-control" readonly value="Not available" disabled>
+                            {% endif %}
+                        </div>
+                        <small class="text-muted">Ethereum address ending in "DEAD"</small>
+                    </div>
+                    <div class="alert alert-info" role="alert">
+                        <strong>How it works:</strong>
+                        <ol class="mb-0 mt-2">
+                            <li>Send SATORI tokens to this burn address on the <strong>Base blockchain</strong></li>
+                            <li>Tokens are tracked by the bridge system daily at 20:00 UTC</li>
+                            <li>After 30 days, equivalent SATORI will be minted on Evrmore chain to your wallet</li>
+                        </ol>
+                    </div>
+                    <div class="alert alert-danger" role="alert">
+                        <i class="material-icons align-middle me-1" style="font-size: 18px;">warning</i>
+                        <strong>Warning:</strong> Only send SATORI tokens from Base chain. Sending other tokens or from wrong networks will result in permanent loss.
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Balance Section -->
         <div class="col-12 col-lg-6">
             <div class="card h-100">

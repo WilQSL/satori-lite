@@ -505,7 +505,20 @@ def register_routes(app):
     def dashboard():
         """Main dashboard page."""
         from satorineuron import VERSION
-        return render_template('dashboard.html', version=VERSION)
+
+        # Derive eth_wallet_address locally from wallet pubkey
+        eth_wallet_address = None
+        try:
+            wallet_manager = get_or_create_session_vault()
+            if wallet_manager and wallet_manager.wallet and hasattr(wallet_manager.wallet, 'pubkey'):
+                wallet_pubkey = wallet_manager.wallet.pubkey
+                if wallet_pubkey:
+                    from satorineuron.common.eth_address import derive_eth_wallet_address_from_pubkey
+                    eth_wallet_address = derive_eth_wallet_address_from_pubkey(wallet_pubkey)
+        except Exception as e:
+            logger.warning(f"Could not derive eth_wallet_address: {e}")
+
+        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address)
 
     @app.route('/stake')
     @login_required
