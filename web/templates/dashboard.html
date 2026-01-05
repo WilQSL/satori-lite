@@ -769,7 +769,17 @@
     }
 
     async function loadStakingStatus() {
-        const result = await apiCall('/lender/status');
+        // Get wallet address first
+        const walletData = await apiCall('/wallet/address');
+        if (!walletData || !walletData.wallet_address) {
+            const statusEl = document.getElementById('stakingStatus');
+            statusEl.className = 'alert alert-warning';
+            statusEl.textContent = 'Unable to load staking status';
+            return;
+        }
+
+        // Query lender status with wallet address
+        const result = await apiCall(`/lender/status?wallet_address=${encodeURIComponent(walletData.wallet_address)}`);
         const statusEl = document.getElementById('stakingStatus');
         if (result && result.pool_address) {
             isStakingToPool = true;
