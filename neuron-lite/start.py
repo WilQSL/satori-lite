@@ -319,7 +319,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                             value = observation.get('value')
                             hash_val = observation.get('hash') or observation.get('id')
                             stream_uuid = observation.get('stream_uuid')
-                            stream_name = observation.get('stream', {}).get('name', 'unknown')
+                            stream = observation.get('stream')
+                            stream_name = stream.get('name', 'unknown') if stream else 'unknown'
 
                             if value is None:
                                 logging.warning(f"Skipping observation with no value (stream: {stream_name})", color='yellow')
@@ -334,21 +335,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                             # Store using server-provided stream UUID
                             if stream_uuid:
-                                # Store observation in stream-specific table
-                                if storage:
-                                    try:
-                                        timestamp = observation.get('observed_at') or observation.get('ts')
-                                        storage.storeStreamObservation(
-                                            streamUuid=stream_uuid,
-                                            timestamp=timestamp,
-                                            value=str(value),
-                                            hash_val=str(hash_val) if hash_val else '',
-                                            provider='central'
-                                        )
-                                        observations_processed += 1
-                                        logging.info(f"✓ Stored {stream_name}: ${float(value):,.2f} (UUID: {stream_uuid[:8]}...)", color='green')
-                                    except Exception as e:
-                                        logging.error(f"Error storing observation for {stream_name}: {e}", color='red')
+                                # Storage is handled by onDataReceived() below
+                                # Removed duplicate storage call to allow prediction triggering
+                                observations_processed += 1
 
                                 # Create stream model if it doesn't exist
                                 if stream_uuid not in self.aiengine.streamModels:
@@ -382,6 +371,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                 if stream_uuid in self.aiengine.streamModels:
                                     try:
                                         self.aiengine.streamModels[stream_uuid].onDataReceived(df)
+                                        logging.info(f"✓ Stored {stream_name}: ${float(value):,.2f} (UUID: {stream_uuid[:8]}...)", color='green')
                                     except Exception as e:
                                         logging.error(f"Error passing to engine for {stream_name}: {e}", color='red')
                             else:
