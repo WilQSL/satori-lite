@@ -98,7 +98,7 @@ def pollObservationsForever(self):
             # 5. Create model if doesn't exist
             if stream_uuid not in self.aiengine.streamModels:
                 streamId = StreamId(
-                    source='central-lite',
+                    source='central',
                     author='satori',
                     stream=stream_name,
                     target=''
@@ -303,7 +303,7 @@ CREATE TABLE IF NOT EXISTS "<uuid>" (
 if stream_uuid not in self.aiengine.streamModels:
     # Create StreamId
     streamId = StreamId(
-        source='central-lite',
+        source='central',
         author='satori',
         stream=stream_name,  # "btc", "eth", etc.
         target=''
@@ -534,7 +534,7 @@ SATORI_UI_PORT=24601     # Web UI port
 ### Running the Neuron
 
 ```bash
-cd /app/central-lite/satori-lite
+cd /app/Satori/neuron
 python neuron-lite/start.py
 ```
 

@@ -32,7 +32,7 @@ CREATE TABLE streams (
 **StreamId components:**
 ```python
 StreamId(
-    source="central-lite",      # Where the data comes from
+    source="central",      # Where the data comes from
     author="satori",            # Who publishes it
     stream="observations",      # Stream type
     target=""                   # Specific target field
@@ -41,7 +41,7 @@ StreamId(
 
 **Generated UUID:**
 ```python
-# UUID5 from: "central-lite:satori:observations:"
+# UUID5 from: "central:satori:observations:"
 uuid = "abc123-def456-789abc-..."
 ```
 
@@ -80,12 +80,12 @@ class StreamId:
 **Example:**
 ```python
 streamId = StreamId(
-    source="central-lite",
+    source="central",
     author="satori",
     stream="observations",
     target=""
 )
-# uuid = UUID5("central-lite:satori:observations:")
+# uuid = UUID5("central:satori:observations:")
 # Result: "7a8b9c0d-1e2f-5a6b-c7d8-e9f0a1b2c3d4" (example)
 ```
 
@@ -97,7 +97,7 @@ streamId = StreamId(
 - Stream metadata: description, secondary, meta
 
 ### What Client Knows
-- StreamId components: **source="central-lite", author="satori", stream="observations", target=""**
+- StreamId components: **source="central", author="satori", stream="observations", target=""**
 - StreamUUID: **"7a8b9c0d-1e2f-5a6b-c7d8-e9f0a1b2c3d4"**
 - No knowledge of "bitcoin" vs "ethereum" distinction
 
@@ -108,7 +108,7 @@ streamId = StreamId(
 Whether the observation is for Bitcoin, Ethereum, or any other crypto, the client stores it in the same table because:
 
 1. Client generates streamUUID from hardcoded components
-2. Components are always the same: `("central-lite", "satori", "observations", "")`
+2. Components are always the same: `("central", "satori", "observations", "")`
 3. Same components → same UUID → same table
 
 **Client cannot distinguish between different observation streams!**
@@ -126,7 +126,7 @@ Whether the observation is for Bitcoin, Ethereum, or any other crypto, the clien
 ### Client receives and stores:
 ```python
 # Client generates streamUUID from hardcoded components
-streamId = StreamId("central-lite", "satori", "observations", "")
+streamId = StreamId("central", "satori", "observations", "")
 uuid = streamId.uuid  # Same UUID every time!
 
 # Stores in table named by UUID
@@ -149,7 +149,7 @@ db.insertRow(
 ### Client receives and stores:
 ```python
 # SAME streamUUID generated!
-streamId = StreamId("central-lite", "satori", "observations", "")
+streamId = StreamId("central", "satori", "observations", "")
 uuid = streamId.uuid  # SAME UUID as Bitcoin!
 
 # Stores in SAME table
@@ -172,7 +172,7 @@ db.insertRow(
 ```python
 # Before (all observations → same table)
 streamId = StreamId(
-    source="central-lite",
+    source="central",
     author="satori",
     stream="observations",  # Generic
     target=""
@@ -180,7 +180,7 @@ streamId = StreamId(
 
 # After (each stream → different table)
 streamId = StreamId(
-    source="central-lite",
+    source="central",
     author="satori",
     stream=server_stream_name,  # "bitcoin", "ethereum", etc.
     target=""
@@ -201,7 +201,7 @@ if response.get('stream'):
 
     # Use stream name in StreamId
     streamId = StreamId(
-        source="central-lite",
+        source="central",
         author="satori",
         stream=stream_name,  # ← Use server's stream name
         target=""
@@ -267,7 +267,7 @@ stream_name = response['stream']['name']
 
 # Generate streamUUID using server's stream name
 streamId = StreamId(
-    source="central-lite",
+    source="central",
     author="satori",
     stream=stream_name,  # ← Key: use server's stream name
     target=""
@@ -317,7 +317,7 @@ def getObservation(self, stream: str = 'bitcoin') -> Union[dict, None]:
 
         # Generate streamId using server's stream name
         self.streamId = StreamId(
-            source="central-lite",
+            source="central",
             author="satori",
             stream=stream_name,  # ← Use server's stream name
             target=""
@@ -346,8 +346,8 @@ Ensure that when storing observations, the streamUUID is generated from the stre
 
 ```python
 # Test different streams generate different UUIDs
-bitcoin_id = StreamId("central-lite", "satori", "bitcoin", "")
-ethereum_id = StreamId("central-lite", "satori", "ethereum", "")
+bitcoin_id = StreamId("central", "satori", "bitcoin", "")
+ethereum_id = StreamId("central", "satori", "ethereum", "")
 
 print(f"Bitcoin UUID: {bitcoin_id.uuid}")
 print(f"Ethereum UUID: {ethereum_id.uuid}")

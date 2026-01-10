@@ -2,7 +2,7 @@
 
 ## Overview
 
-Added streams metadata table and methods to the satori-lite client SQLite database. This allows the client to store and query stream information received from the central server.
+Added streams metadata table and methods to the neuron client SQLite database. This allows the client to store and query stream information received from the central server.
 
 ## What Was Implemented
 
@@ -233,7 +233,7 @@ assert uuid == "test-uuid-123"
 ## Files Modified/Created
 
 ```
-satori-lite/
+neuron/
 ├── migrations/
 │   └── add_client_streams_table.sql          (NEW)
 ├── engine-lite/storage/

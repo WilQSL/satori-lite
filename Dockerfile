@@ -13,7 +13,7 @@ RUN apt-get update && \
 # Create directory structure
 RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
 
-# Copy satori-lite code
+# Copy neuron code
 COPY lib-lite /Satori/Lib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine

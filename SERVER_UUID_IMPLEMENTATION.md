@@ -11,7 +11,7 @@ This document describes the implementation of server-generated UUIDs for streams
 
 Previously, the client generated stream UUIDs locally using hardcoded StreamId components:
 ```python
-StreamId(source="central-lite", author="satori", stream="observations", target="")
+StreamId(source="central", author="satori", stream="observations", target="")
 ```
 
 This caused **all observations** (Bitcoin, Ethereum, etc.) to be stored in the **same table** because the UUID was identical for all streams.
@@ -114,7 +114,7 @@ class ObservationResponse(BaseModel):
 
 ### 2. Client-Side Changes
 
-#### A. Client Streams Table (`satori-lite/migrations/add_client_streams_table.sql`)
+#### A. Client Streams Table (`neuron/migrations/add_client_streams_table.sql`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS streams (
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS streams (
 - `target` field added
 - `last_synced` tracks when metadata was last updated
 
-#### B. SQLite Manager (`satori-lite/engine-lite/storage/sqlite_manager.py`)
+#### B. SQLite Manager (`neuron/engine-lite/storage/sqlite_manager.py`)
 
 Added stream metadata management methods:
 
@@ -156,7 +156,7 @@ def upsertStream(
     # Stores/updates stream metadata using server-provided UUID
 ```
 
-#### C. Server Client (`satori-lite/lib-lite/satorilib/server/server.py`)
+#### C. Server Client (`neuron/lib-lite/satorilib/server/server.py`)
 
 Updated `getObservation()` to extract and store stream metadata:
 
@@ -203,12 +203,12 @@ def getObservation(self, stream: str = 'bitcoin', storage=None) -> Union[dict, N
 - Calls `upsertStream()` to store metadata locally
 - Adds `stream_uuid` to response for downstream use
 
-#### D. Neuron Integration (`satori-lite/neuron-lite/start.py`)
+#### D. Neuron Integration (`neuron/neuron-lite/start.py`)
 
 Updated observation polling to pass storage and use server UUID:
 
 ```python
-# Get latest observation from central-lite
+# Get latest observation from central
 storage = getattr(self.aiengine, 'storage', None)
 observation = self.server.getObservation(storage=storage)
 
@@ -282,7 +282,7 @@ else:
 
 2. **Client Migration**:
    ```bash
-   sqlite3 /path/to/client.db < satori-lite/migrations/add_client_streams_table.sql
+   sqlite3 /path/to/client.db < neuron/migrations/add_client_streams_table.sql
    ```
 
 3. **Code Deployment**:
@@ -330,16 +330,16 @@ print(f"Stored UUID: {stream['uuid']}")  # Should match server's UUID
 ## Related Files
 
 ### Server
-- `/app/central-lite/migrations/add_streams_table.sql`
-- `/app/central-lite/src/models/stream.py`
-- `/app/central-lite/src/models/schemas.py`
-- `/app/central-lite/src/models/observation.py`
+- `/app/Satori/central/migrations/add_streams_table.sql`
+- `/app/Satori/central/src/models/stream.py`
+- `/app/Satori/central/src/models/schemas.py`
+- `/app/Satori/central/src/models/observation.py`
 
 ### Client
-- `/app/central-lite/satori-lite/migrations/add_client_streams_table.sql`
-- `/app/central-lite/satori-lite/engine-lite/storage/sqlite_manager.py`
-- `/app/central-lite/satori-lite/lib-lite/satorilib/server/server.py`
-- `/app/central-lite/satori-lite/neuron-lite/start.py`
+- `/app/Satori/neuron/migrations/add_client_streams_table.sql`
+- `/app/Satori/neuron/engine-lite/storage/sqlite_manager.py`
+- `/app/Satori/neuron/lib-lite/satorilib/server/server.py`
+- `/app/Satori/neuron/neuron-lite/start.py`
 
 ## Future Enhancements
 
