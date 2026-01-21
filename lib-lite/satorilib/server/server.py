@@ -834,7 +834,8 @@ class SatoriServerClient(object):
         try:
             response = self._makeAuthenticatedCall(
                 function=requests.get,
-                endpoint='/api/v1/peer/reward-address')
+                endpoint='/api/v1/peer/reward-address',
+                raiseForStatus=False)
             if response.status_code > 399:
                 return None
             # Parse JSON response
