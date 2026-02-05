@@ -61,11 +61,21 @@ class SKAdapter(ModelAdapter):
             saved_state = joblib.load(modelPath)
             self.model = saved_state['stableModel']
             self.modelError = saved_state['modelError']
+            info(f"Successfully loaded model from {modelPath}", color='green')
             return self.model
         except Exception as e:
-            debug(f"Error Loading Model File : {e}", print=True)
             if os.path.isfile(modelPath):
-                os.remove(modelPath)
+                # Only delete if file is actually corrupt
+                if "pickle" in str(e).lower() or "corrupt" in str(e).lower() or "truncated" in str(e).lower():
+                    warning(f"Model file appears corrupted, deleting: {modelPath}. Error: {e}")
+                    try:
+                        os.remove(modelPath)
+                    except Exception as del_err:
+                        error(f"Failed to delete corrupted model: {del_err}")
+                else:
+                    warning(f"Failed to load model (keeping file for retry): {e}")
+            else:
+                debug(f"Model file does not exist: {modelPath}")
             return None
 
     def save(self, modelpath: str, **kwargs) -> bool:
@@ -78,9 +88,10 @@ class SKAdapter(ModelAdapter):
                 'modelError' : self.modelError
             }
             joblib.dump(state, modelpath)
+            info(f"Successfully saved model to {modelpath} (error: {self.modelError:.4f})", color='green')
             return True
         except Exception as e:
-            print(f"Error saving model: {e}")
+            error(f"Failed to save model to {modelpath}: {e}")
             return False
 
     def compare(self, other: Union[ModelAdapter, None] = None, **kwargs) -> bool:

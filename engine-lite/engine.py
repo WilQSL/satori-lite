@@ -28,6 +28,9 @@ from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter,
 from satoriengine.veda.storage import EngineStorageManager
 
 warnings.filterwarnings('ignore')
+
+# Default stream UUID to hide from logs (central-lite placeholder stream)
+DEFAULT_STREAM_UUID = "a99072f1-421f-5ad8-87e0-8c3766b93810"
 setup(level=INFO)
 
 
@@ -311,7 +314,8 @@ class Engine:
                     storage=self.storage)
                 self.streamModels[subUuid].chooseAdapter(inplace=True)
                 self.streamModels[subUuid].run_forever()
-                info(f"Model initialized for stream {subUuid}", color='green')
+                if subUuid != DEFAULT_STREAM_UUID:
+                    info(f"Model initialized for stream {subUuid}", color='green')
             except Exception as e:
                 error(f"Failed to initialize model for stream {subUuid}: {e}")
 
@@ -517,7 +521,8 @@ class StreamModel:
         self.stable: ModelAdapter = copy.deepcopy(self.pilot)
         self.paused: bool = False
         self.dataClientOfExtServer: Union[DataClient, None] = DataClient(self.dataClientOfIntServer.serverHostPort[0], self.dataClientOfIntServer.serverPort, identity=self.identity)
-        debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__}', color='teal')
+        if self.streamUuid != DEFAULT_STREAM_UUID:
+            debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__}', color='teal')
 
     def initializeFromServer(self):
         """Initialize model when using Central Server directly"""
@@ -527,7 +532,8 @@ class StreamModel:
         self.pilot.load(self.modelPath())
         self.stable: ModelAdapter = copy.deepcopy(self.pilot)
         self.paused: bool = False
-        debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__} (Central Server mode)', color='teal')
+        if self.streamUuid != DEFAULT_STREAM_UUID:
+            debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__} (Central Server mode)', color='teal')
 
     def _loadTrainingDelay(self) -> int:
         """Load training delay from config file.
@@ -549,9 +555,11 @@ class StreamModel:
         # For now, load from local SQLite if available
         localData = self.storage.getStreamDataForEngine(self.streamUuid)
         if not localData.empty:
-            info(f"Loaded {len(localData)} rows from local SQLite for stream {self.streamUuid}", color='green')
+            if self.streamUuid != DEFAULT_STREAM_UUID:
+                info(f"Loaded {len(localData)} rows from local SQLite for stream {self.streamUuid}", color='green')
             return localData
-        info(f"No local data for stream {self.streamUuid}, starting fresh", color='yellow')
+        if self.streamUuid != DEFAULT_STREAM_UUID:
+            info(f"No local data for stream {self.streamUuid}, starting fresh", color='yellow')
         return pd.DataFrame(columns=["date_time", "value", "id"])
 
     def onDataReceived(self, data: pd.DataFrame):
@@ -591,6 +599,16 @@ class StreamModel:
                 engineDf = engineDf.rename(columns={'ts': 'date_time', 'hash': 'id'})
             if 'provider' in engineDf.columns:
                 del engineDf['provider']
+
+            # Ensure date_time is datetime type (handle both Unix timestamps and ISO strings)
+            if 'date_time' in engineDf.columns and not pd.api.types.is_datetime64_any_dtype(engineDf['date_time']):
+                # Try as Unix timestamp first
+                numeric_times = pd.to_numeric(engineDf['date_time'], errors='coerce')
+                if numeric_times.notna().all() and numeric_times.min() > 946684800:
+                    engineDf['date_time'] = pd.to_datetime(numeric_times, unit='s', utc=True)
+                else:
+                    # Parse as ISO string
+                    engineDf['date_time'] = pd.to_datetime(engineDf['date_time'], utc=True)
 
             self.data = pd.concat([self.data, engineDf], ignore_index=True)
             self.data = self.data.drop_duplicates(subset=['date_time'], keep='last')
@@ -880,7 +898,7 @@ class StreamModel:
                 else:
                     error("Row not added due to corrupt observation")
         except Exception as e:
-            error("Subscription data not added", e)
+            error(f"Failed to append subscription data for stream {self.streamUuid}: {type(e).__name__}: {e}")
 
     def passPredictionData(self, forecast: pd.DataFrame, passToCentralServer: bool = False):
         try:
@@ -1039,12 +1057,13 @@ class StreamModel:
                         secondValue = StreamForecast.firstPredictionOf(secondForecast)
                         debug(f"[AUTOREGRESSION] Second prediction (queued for batch): {secondValue}", color='cyan')
                     else:
+                        warning(f"Second prediction returned {type(secondForecast).__name__} instead of DataFrame, using first prediction only")
                         secondForecast = None
 
                     forecast = secondForecast if secondForecast is not None else firstForecast
                 else:
                     # First prediction failed, skip autoregression
-                    debug("[AUTOREGRESSION] Skipping - first prediction failed", color='yellow')
+                    warning(f"First prediction returned {type(firstForecast).__name__} instead of DataFrame (value: {str(firstForecast)[:100]}), skipping autoregression")
                     forecast = firstForecast
 
                 if isinstance(forecast, pd.DataFrame):
@@ -1057,25 +1076,27 @@ class StreamModel:
                     else:
                         self.passPredictionData(predictionDf, True)
                 else:
-                    raise Exception('Forecast not in dataframe format')
+                    raise Exception(f'Forecast not in DataFrame format - got {type(forecast).__name__} with value: {str(forecast)[:200]}')
         except Exception as e:
-            error(e)
+            error(f"Prediction failed for stream {self.streamUuid}: {type(e).__name__}: {e}")
             self.fallback_prediction()
 
     def fallback_prediction(self):
-        if os.path.isfile(self.modelPath()):
-            try:
-                os.remove(self.modelPath())
-                debug("Deleted failed model file:", self.modelPath(), color="teal")
-            except Exception as e:
-                error(f'Failed to delete model file: {str(e)}')
+        """Fallback when prediction fails - use backup model without deleting existing model.
+
+        The model file might be fine; the issue could be with prediction logic or data format.
+        We'll let the normal training cycle replace the model if needed.
+        """
+        warning(f"Prediction failed for stream {self.streamUuid}, using fallback model (keeping existing model file)")
         backupModel = self.defaultAdapters[-1]()
         try:
             trainingResult = backupModel.fit(data=self.data)
             if abs(trainingResult.status) == 1:
                 self.producePrediction(backupModel)
+            else:
+                warning(f"Fallback model training failed with status {trainingResult.status}")
         except Exception as e:
-            error(f"Error training new model: {str(e)}")
+            error(f"Error training fallback model for stream {self.streamUuid}: {str(e)}")
 
     def loadData(self) -> pd.DataFrame:
         try:
@@ -1090,7 +1111,7 @@ class StreamModel:
             else:
                 raise Exception(response.senderMsg)
         except Exception as e:
-            debug(e)
+            debug(f"Failed to load data for stream {self.streamUuid}: {e}")
             return pd.DataFrame(columns=["date_time", "value", "id"])
 
     def modelPath(self) -> str:
@@ -1161,21 +1182,60 @@ class StreamModel:
                 time.sleep(10)
                 continue
             self.chooseAdapter(inplace=True)
+
+            # Skip training loop for StarterAdapter (it doesn't actually train)
+            # Only train when we have enough data and switch to XgbAdapter
+            if self.adapter.__name__ == 'StarterAdapter':
+                time.sleep(self.trainingDelay)
+                continue
+
+            # Log training iteration start
+            # if self.streamUuid != DEFAULT_STREAM_UUID:
+            #     debug(f"[TRAINING] Starting iteration for {self.streamUuid[:8]}... using {self.adapter.__name__}", color='cyan')
+
             try:
                 trainingResult = self.pilot.fit(data=self.data, stable=self.stable)
                 if trainingResult.status == 1:
+                    # if self.streamUuid != DEFAULT_STREAM_UUID:
+                    #     debug(f"[TRAINING] Training completed for {self.streamUuid[:8]}..., comparing models", color='cyan')
+
                     if self.pilot.compare(self.stable):
-                        if self.pilot.save(self.modelPath()):
+                        # Model improved!
+                        # if self.streamUuid != DEFAULT_STREAM_UUID:
+                        #     info(f"[TRAINING] Model IMPROVED for {self.streamUuid[:8]}..., attempting save", color='yellow')
+
+                        # Try to save with retry logic
+                        saveSuccess = False
+                        for attempt in range(3):
+                            if self.pilot.save(self.modelPath()):
+                                saveSuccess = True
+                                break
+                            if attempt < 2:
+                                warning(f"Model save attempt {attempt + 1}/3 failed, retrying in 5 seconds...")
+                                time.sleep(5)
+
+                        if saveSuccess:
                             self.stable = copy.deepcopy(self.pilot)
-                            info("stable model updated for stream:", self.streamUuid)
+                            if self.streamUuid != DEFAULT_STREAM_UUID:
+                                info(f"Stable model updated for stream: {self.streamUuid}", color='green')
+                        else:
+                            if self.streamUuid != DEFAULT_STREAM_UUID:
+                                error(f"Failed to save improved model after 3 attempts for stream {self.streamUuid}. Model exists in memory but not on disk.")
+                            # Don't update stable - keep previous version in memory
+                    else:
+                        # Model didn't improve (log disabled to reduce noise)
+                        # if self.streamUuid != DEFAULT_STREAM_UUID:
+                        #     debug(f"[TRAINING] Model did NOT improve for {self.streamUuid[:8]}... (pilot={getattr(self.pilot, 'modelError', 'N/A')}, stable={getattr(self.stable, 'modelError', 'N/A')})", color='yellow')
+                        pass
                 else:
-                    debug(f'model training failed on {self.streamUuid} waiting 10 minutes to retry')
+                    if self.streamUuid != DEFAULT_STREAM_UUID:
+                        warning(f'[TRAINING] Training failed for {self.streamUuid[:8]}... (status={trainingResult.status}), waiting 10 minutes to retry')
                     self.failedAdapters.append(self.pilot)
                     time.sleep(600)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                error(e)
+                error(f"Training error for stream {self.streamUuid}: {type(e).__name__}: {e}")
                 try:
                     debug(self.pilot.dataset)
                 except Exception as e:
@@ -1191,7 +1251,8 @@ class StreamModel:
         '''Creates separate threads for running the model training loop'''
 
         if hasattr(self, 'thread') and self.thread and self.thread.is_alive():
-            warning(f"Thread for model {self.streamUuid} already running. Not creating another.")
+            if self.streamUuid != DEFAULT_STREAM_UUID:
+                warning(f"Thread for model {self.streamUuid} already running. Not creating another.")
             return
 
         def training_loop_thread():

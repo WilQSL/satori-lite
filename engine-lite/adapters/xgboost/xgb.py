@@ -7,7 +7,7 @@ import datetime
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
-from satorilib.logging import info, debug, warning
+from satorilib.logging import info, debug, warning, error
 from satoriengine.veda.adapters.xgboost.preprocess import xgbDataPreprocess, _prepareTimeFeatures
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
 
@@ -46,11 +46,21 @@ class XgbAdapter(ModelAdapter):
             saved = joblib.load(modelPath)
             self.model = saved['stableModel']
             self.modelError = saved['modelError']
+            info(f"Successfully loaded model from {modelPath}", color='green')
             return self.model
         except Exception as e:
-            debug(f"Error Loading Model File : {e}", print=True)
             if os.path.isfile(modelPath):
-                os.remove(modelPath)
+                # Only delete if file is actually corrupt
+                if "pickle" in str(e).lower() or "corrupt" in str(e).lower() or "truncated" in str(e).lower():
+                    warning(f"Model file appears corrupted, deleting: {modelPath}. Error: {e}")
+                    try:
+                        os.remove(modelPath)
+                    except Exception as del_err:
+                        error(f"Failed to delete corrupted model: {del_err}")
+                else:
+                    warning(f"Failed to load model (keeping file for retry): {e}")
+            else:
+                debug(f"Model file does not exist: {modelPath}")
             try:
                 if 'XgbAdapter' not in modelPath:
                     modelPath = '/'.join(modelPath.split('/')[:-1]) + '/' + 'XgbAdapter.joblib'
@@ -68,9 +78,10 @@ class XgbAdapter(ModelAdapter):
                 'stableModel' : self.model,
                 'modelError' : self.modelError}
             joblib.dump(state, modelpath)
+            info(f"Successfully saved model to {modelpath} (error: {self.modelError:.4f})", color='green')
             return True
         except Exception as e:
-            warning(f"Error saving model: {e}")
+            error(f"Failed to save model to {modelpath}: {e}")
             return False
 
     def compare(self, other: Union[ModelAdapter, None] = None, **kwargs) -> bool:

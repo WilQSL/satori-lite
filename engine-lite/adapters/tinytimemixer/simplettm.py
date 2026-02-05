@@ -3,7 +3,7 @@ from typing import Union, List
 import joblib
 import os
 import numpy as np
-from satorilib.logging import info, debug, warning
+from satorilib.logging import info, debug, warning, error
 from satoriengine.veda.adapters.tinytimemixer.preprocess import ttmDataPreprocess
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
 from sktime.forecasting.ttm import TinyTimeMixerForecaster
@@ -33,11 +33,21 @@ class SimpleTTMAdapter(ModelAdapter):
         try:
             saved_state = joblib.load(modelPath)
             self.model = saved_state['stableModel']
+            info(f"Successfully loaded model from {modelPath}", color='green')
             return self.model
         except Exception as e:
-            debug(f"Error Loading Model File : {e}", print=True)
             if os.path.isfile(modelPath):
-                os.remove(modelPath)
+                # Only delete if file is actually corrupt
+                if "pickle" in str(e).lower() or "corrupt" in str(e).lower() or "truncated" in str(e).lower():
+                    warning(f"Model file appears corrupted, deleting: {modelPath}. Error: {e}")
+                    try:
+                        os.remove(modelPath)
+                    except Exception as del_err:
+                        error(f"Failed to delete corrupted model: {del_err}")
+                else:
+                    warning(f"Failed to load model (keeping file for retry): {e}")
+            else:
+                debug(f"Model file does not exist: {modelPath}")
             return None
 
     def save(self, modelpath: str, **kwargs) -> bool:
@@ -49,9 +59,10 @@ class SimpleTTMAdapter(ModelAdapter):
                 'stableModel' : self.model,
             }
             joblib.dump(state, modelpath)
+            info(f"Successfully saved model to {modelpath}", color='green')
             return True
         except Exception as e:
-            print(f"Error saving model: {e}")
+            error(f"Failed to save model to {modelpath}: {e}")
             return False
 
     def fit(self, data: pd.DataFrame, **kwargs) -> TrainingResult:

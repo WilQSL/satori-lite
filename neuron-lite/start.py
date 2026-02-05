@@ -379,6 +379,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                         # Choose and initialize appropriate adapter
                                         self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
 
+                                        # Start training thread for this stream
+                                        try:
+                                            self.aiengine.streamModels[stream_uuid].run_forever()
+                                            logging.info(f"→ Training thread started for: {stream_name}", color='cyan')
+                                        except Exception as e:
+                                            logging.error(f"Failed to start training thread for {stream_name}: {e}", color='red')
+
                                         logging.info(f"✓ Created model for stream: {stream_name} (UUID: {stream_uuid[:8]}...)", color='magenta')
                                     except Exception as e:
                                         logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
@@ -655,7 +662,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.subscriptions = [subscription]
         self.publications = [publication]
 
-        logging.info(f"Default stream configured: {sub_id.uuid}", color="green")
+        # Suppress log for default stream to reduce noise
+        # logging.info(f"Default stream configured: {sub_id.uuid}", color="green")
 
     def spawnEngine(self):
         """Spawn the AI Engine with stream assignments from Neuron"""
@@ -674,6 +682,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             def runEngine():
                 try:
                     self.aiengine.initializeFromNeuron()
+
+                    # Start training threads for initial stream models only
+                    # Additional models will be created dynamically when observations arrive
+                    for stream_uuid, model in self.aiengine.streamModels.items():
+                        try:
+                            model.run_forever()
+                        except Exception as e:
+                            logging.error(f"Failed to start training thread for {stream_uuid}: {e}")
+
+                    logging.info("Models will be created dynamically when observations arrive", color="cyan")
+
+                    # Keep engine thread alive
                     while True:
                         time.sleep(60)
                 except Exception as e:
