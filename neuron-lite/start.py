@@ -307,8 +307,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         def pollForever():
             # First poll: random delay between 1 and 11 hours
-            # initial_delay = random.randint(60 * 60, 60 * 60 * 11)
-            initial_delay = 60
+            initial_delay = random.randint(60 * 60, 60 * 60 * 11)
             logging.info(f"First observation poll in {initial_delay / 3600:.1f} hours", color='blue')
             time.sleep(initial_delay)
 
