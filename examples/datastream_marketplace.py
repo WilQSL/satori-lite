@@ -27,9 +27,9 @@ from satori_nostr import (
 class DatastreamProvider:
     """Represents a single datastream provider neuron."""
 
-    def __init__(self, name: str, stream_id: str, description: str, price: int, tags: list[str]):
+    def __init__(self, name: str, stream_name: str, description: str, price: int, tags: list[str]):
         self.name = name
-        self.stream_id = stream_id
+        self.stream_name = stream_name
         self.description = description
         self.price = price
         self.tags = tags
@@ -48,14 +48,16 @@ class DatastreamProvider:
         await self.client.start()
 
         # Announce datastream
+        now = int(time.time())
         metadata = DatastreamMetadata(
-            stream_id=self.stream_id,
-            neuron_pubkey=self.client.pubkey(),
+            stream_name=self.stream_name,
+            nostr_pubkey=self.client.pubkey(),
             name=self.name,
             description=self.description,
             encrypted=(self.price > 0),  # Encrypt paid streams
             price_per_obs=self.price,
-            created_at=int(time.time()),
+            created_at=now,
+            cadence_seconds=3600,  # Hourly cadence for marketplace demo
             tags=self.tags
         )
 
@@ -72,7 +74,7 @@ class DatastreamProvider:
         value = self._generate_data()
 
         observation = DatastreamObservation(
-            stream_id=self.stream_id,
+            stream_name=self.stream_name,
             timestamp=int(time.time()),
             value=value,
             seq_num=self.seq_num
@@ -121,7 +123,7 @@ class DatastreamSubscriber:
         self.name = name
         self.keys = Keys.generate()
         self.client = None
-        self.subscriptions = {}  # stream_id -> metadata
+        self.subscriptions = {}  # stream_name -> metadata
 
     async def start(self, relay_urls: list[str]):
         """Start the subscriber."""
@@ -143,18 +145,18 @@ class DatastreamSubscriber:
 
         for stream in streams[:3]:  # Subscribe to first 3
             await self.client.subscribe_datastream(
-                stream_id=stream.stream_id,
-                provider_pubkey=stream.neuron_pubkey,
+                stream_name=stream.stream_name,
+                provider_pubkey=stream.nostr_pubkey,
             )
 
-            self.subscriptions[stream.stream_id] = stream
+            self.subscriptions[stream.stream_name] = stream
             print(f"  {self.name} subscribed to {stream.name}")
 
             # If paid stream, send initial payment
             if stream.price_per_obs > 0:
                 await self.client.send_payment(
-                    provider_pubkey=stream.neuron_pubkey,
-                    stream_id=stream.stream_id,
+                    provider_pubkey=stream.nostr_pubkey,
+                    stream_name=stream.stream_name,
                     seq_num=1,  # Pay for first observation
                     amount_sats=stream.price_per_obs,
                 )
@@ -166,7 +168,7 @@ class DatastreamSubscriber:
 
         async for inbound in self.client.observations():
             obs = inbound.observation
-            stream = self.subscriptions.get(obs.stream_id)
+            stream = self.subscriptions.get(obs.stream_name)
 
             if stream:
                 print(f"  📊 {self.name} received: {stream.name} seq #{obs.seq_num}")
@@ -174,8 +176,8 @@ class DatastreamSubscriber:
                 # Send payment for next observation if paid stream
                 if stream.price_per_obs > 0:
                     await self.client.send_payment(
-                        provider_pubkey=stream.neuron_pubkey,
-                        stream_id=stream.stream_id,
+                        provider_pubkey=stream.nostr_pubkey,
+                        stream_name=stream.stream_name,
                         seq_num=obs.seq_num + 1,
                         amount_sats=stream.price_per_obs,
                     )
@@ -206,21 +208,21 @@ async def run_marketplace():
     providers = [
         DatastreamProvider(
             name="Bitcoin Price Feed",
-            stream_id="btc-usd-coinbase",
+            stream_name="btc-usd-coinbase",
             description="Real-time BTC/USD from Coinbase",
             price=10,  # 10 sats/observation
             tags=["bitcoin", "price", "usd", "crypto"]
         ),
         DatastreamProvider(
             name="Weather Station NYC",
-            stream_id="weather-nyc",
+            stream_name="weather-nyc",
             description="Live weather data from New York City",
             price=0,  # Free
             tags=["weather", "nyc", "free"]
         ),
         DatastreamProvider(
             name="Tech News Feed",
-            stream_id="tech-news",
+            stream_name="tech-news",
             description="Breaking technology news headlines",
             price=5,  # 5 sats/observation
             tags=["news", "tech", "headlines"]

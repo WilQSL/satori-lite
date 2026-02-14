@@ -59,8 +59,8 @@ async def main():
     print(f"Found {len(streams)} datastream(s):\n")
     for i, stream in enumerate(streams, 1):
         print(f"{i}. {stream.name}")
-        print(f"   ID: {stream.stream_id}")
-        print(f"   Provider: {stream.neuron_pubkey[:16]}...")
+        print(f"   ID: {stream.stream_name}")
+        print(f"   Provider: {stream.nostr_pubkey[:16]}...")
         print(f"   Price: {stream.price_per_obs} sats/observation")
         print(f"   Encrypted: {stream.encrypted}")
         print(f"   Tags: {', '.join(stream.tags)}")
@@ -72,8 +72,8 @@ async def main():
 
     # Announce subscription
     event_id = await client.subscribe_datastream(
-        stream_id=stream.stream_id,
-        provider_pubkey=stream.neuron_pubkey,
+        stream_name=stream.stream_name,
+        provider_pubkey=stream.nostr_pubkey,
         payment_channel="demo:channel123"  # In production, use real Lightning channel
     )
 
@@ -92,7 +92,7 @@ async def main():
             obs = inbound.observation
 
             print(f"📊 Observation #{obs.seq_num} received")
-            print(f"   Stream: {obs.stream_id}")
+            print(f"   Stream: {obs.stream_name}")
             print(f"   Timestamp: {time.ctime(obs.timestamp)}")
             print(f"   Value: {obs.value}")
             print(f"   From: {inbound.provider_pubkey[:16]}...")
@@ -104,8 +104,8 @@ async def main():
 
                 try:
                     payment_event_id = await client.send_payment(
-                        provider_pubkey=stream.neuron_pubkey,
-                        stream_id=stream.stream_id,
+                        provider_pubkey=stream.nostr_pubkey,
+                        stream_name=stream.stream_name,
                         seq_num=next_seq,
                         amount_sats=stream.price_per_obs,
                         tx_id=f"demo:tx_{next_seq}"  # In production, use real tx ID

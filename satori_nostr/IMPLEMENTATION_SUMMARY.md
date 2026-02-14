@@ -195,7 +195,7 @@ client.is_running()         # Check status
 ```python
 await client.announce_datastream(metadata)
 await client.publish_observation(obs, metadata)
-client.get_subscribers(stream_id)
+client.get_subscribers(stream_name)
 client.record_subscription(...)
 client.record_payment(...)
 async for payment in client.payments():
@@ -206,9 +206,9 @@ async for payment in client.payments():
 ```python
 await client.discover_datastreams(tags=["bitcoin"])
 await client.get_datastream("stream-id")
-await client.subscribe_datastream(stream_id, provider_pk)
-await client.unsubscribe_datastream(stream_id, provider_pk)
-await client.send_payment(provider_pk, stream_id, seq, amount)
+await client.subscribe_datastream(stream_name, provider_pk)
+await client.unsubscribe_datastream(stream_name, provider_pk)
+await client.send_payment(provider_pk, stream_name, seq, amount)
 async for obs in client.observations():
     ...
 ```
@@ -217,8 +217,8 @@ async for obs in client.observations():
 ```python
 client.list_announced_streams()
 client.get_statistics()
-client.get_subscriber_info(stream_id, sub_pk)
-client.get_all_subscribers_info(stream_id)
+client.get_subscriber_info(stream_name, sub_pk)
+client.get_all_subscribers_info(stream_name)
 ```
 
 ## Testing

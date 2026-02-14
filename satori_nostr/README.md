@@ -48,8 +48,8 @@ async def provider_example():
 
     # Announce a datastream
     metadata = DatastreamMetadata(
-        stream_id="btc-price-usd",
-        neuron_pubkey=client.pubkey(),
+        stream_name="btc-price-usd",
+        nostr_pubkey=client.pubkey(),
         name="Bitcoin Price (USD)",
         description="Real-time BTC/USD from Coinbase",
         encrypted=True,
@@ -64,7 +64,7 @@ async def provider_example():
     # Publish observations to paid subscribers
     for seq in range(1, 100):
         observation = DatastreamObservation(
-            stream_id="btc-price-usd",
+            stream_name="btc-price-usd",
             timestamp=int(time.time()),
             value={"price": 45000 + seq * 100, "volume": 123.45},
             seq_num=seq
@@ -104,8 +104,8 @@ async def subscriber_example():
     if streams:
         stream = streams[0]
         await client.subscribe_datastream(
-            stream.stream_id,
-            stream.neuron_pubkey,
+            stream.stream_name,
+            stream.nostr_pubkey,
             payment_channel="lightning:channel123"
         )
         print(f"Subscribed to {stream.name}")
@@ -118,8 +118,8 @@ async def subscriber_example():
 
             # Send payment for this observation
             await client.send_payment(
-                provider_pubkey=stream.neuron_pubkey,
-                stream_id=stream.stream_id,
+                provider_pubkey=stream.nostr_pubkey,
+                stream_name=stream.stream_name,
                 seq_num=obs.seq_num + 1,  # Pay for NEXT observation
                 amount_sats=stream.price_per_obs
             )
@@ -163,8 +163,8 @@ asyncio.run(subscriber_example())
 **DatastreamMetadata** (kind 30100 content)
 ```python
 {
-    "stream_id": "btc-price-usd",
-    "neuron_pubkey": "abc123...",
+    "stream_name": "btc-price-usd",
+    "nostr_pubkey": "abc123...",
     "name": "Bitcoin Price (USD)",
     "description": "Real-time BTC/USD",
     "encrypted": true,
@@ -177,7 +177,7 @@ asyncio.run(subscriber_example())
 **DatastreamObservation** (kind 30101 encrypted content)
 ```python
 {
-    "stream_id": "btc-price-usd",
+    "stream_name": "btc-price-usd",
     "timestamp": 1234567890,
     "value": {"price": 45000, "volume": 123.45},
     "seq_num": 42
@@ -189,7 +189,7 @@ asyncio.run(subscriber_example())
 {
     "from_pubkey": "subscriber...",
     "to_pubkey": "provider...",
-    "stream_id": "btc-price-usd",
+    "stream_name": "btc-price-usd",
     "seq_num": 43,
     "amount_sats": 10,
     "timestamp": 1234567890,
@@ -218,16 +218,16 @@ config = SatoriNostrConfig(
 
 - `announce_datastream(metadata) -> str` - Publish stream metadata
 - `publish_observation(obs, metadata) -> list[str]` - Send obs to paid subscribers
-- `get_subscribers(stream_id) -> list[str]` - List subscriber pubkeys
-- `record_subscription(stream_id, sub_pubkey, channel)` - Record new subscriber
-- `record_payment(stream_id, sub_pubkey, seq_num)` - Record payment
+- `get_subscribers(stream_name) -> list[str]` - List subscriber pubkeys
+- `record_subscription(stream_name, sub_pubkey, channel)` - Record new subscriber
+- `record_payment(stream_name, sub_pubkey, seq_num)` - Record payment
 - `payments() -> AsyncIterator[InboundPayment]` - Receive payment notifications
 
 #### Subscriber Methods
 
 - `discover_datastreams(tags, limit) -> list[DatastreamMetadata]` - Find streams
-- `subscribe_datastream(stream_id, provider_pk, channel) -> str` - Subscribe
-- `send_payment(provider_pk, stream_id, seq, amount, tx_id) -> str` - Send payment
+- `subscribe_datastream(stream_name, provider_pk, channel) -> str` - Subscribe
+- `send_payment(provider_pk, stream_name, seq, amount, tx_id) -> str` - Send payment
 - `observations() -> AsyncIterator[InboundObservation]` - Receive observations
 
 #### Lifecycle

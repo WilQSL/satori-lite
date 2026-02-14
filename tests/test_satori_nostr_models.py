@@ -20,80 +20,360 @@ class TestDatastreamMetadata:
     def test_create_metadata(self):
         """Test creating datastream metadata."""
         metadata = DatastreamMetadata(
-            stream_id="btc-price-usd",
-            neuron_pubkey="abc123",
+            stream_name="btc-price-usd",
+            nostr_pubkey="abc123",
             name="Bitcoin Price (USD)",
             description="Real-time BTC/USD price from Coinbase",
             encrypted=True,
             price_per_obs=10,
             created_at=1234567890,
+            cadence_seconds=3600,
             tags=["bitcoin", "price", "usd"],
         )
 
-        assert metadata.stream_id == "btc-price-usd"
-        assert metadata.neuron_pubkey == "abc123"
+        assert metadata.stream_name == "btc-price-usd"
+        assert metadata.nostr_pubkey == "abc123"
         assert metadata.name == "Bitcoin Price (USD)"
         assert metadata.encrypted is True
         assert metadata.price_per_obs == 10
+        assert metadata.cadence_seconds == 3600
         assert len(metadata.tags) == 3
 
     def test_serialize_to_dict(self):
         """Test serializing metadata to dictionary."""
         metadata = DatastreamMetadata(
-            stream_id="btc-price-usd",
-            neuron_pubkey="abc123",
+            stream_name="btc-price-usd",
+            nostr_pubkey="abc123",
             name="Bitcoin Price",
             description="BTC/USD",
             encrypted=False,
             price_per_obs=0,
             created_at=1234567890,
+            cadence_seconds=3600,
             tags=["bitcoin"],
         )
 
         data = metadata.to_dict()
         assert isinstance(data, dict)
-        assert data["stream_id"] == "btc-price-usd"
+        assert data["stream_name"] == "btc-price-usd"
         assert data["encrypted"] is False
         assert data["price_per_obs"] == 0
+        assert data["cadence_seconds"] == 3600
 
     def test_deserialize_from_dict(self):
         """Test deserializing metadata from dictionary."""
         data = {
-            "stream_id": "eth-price",
-            "neuron_pubkey": "def456",
+            "stream_name": "eth-price",
+            "nostr_pubkey": "def456",
             "name": "ETH Price",
             "description": "Ethereum price",
             "encrypted": True,
             "price_per_obs": 5,
             "created_at": 1234567890,
+            "cadence_seconds": 3600,
             "tags": ["ethereum", "price"],
         }
 
         metadata = DatastreamMetadata.from_dict(data)
-        assert metadata.stream_id == "eth-price"
+        assert metadata.stream_name == "eth-price"
         assert metadata.encrypted is True
+        assert metadata.cadence_seconds == 3600
         assert len(metadata.tags) == 2
 
     def test_json_round_trip(self):
         """Test JSON serialization round-trip."""
         original = DatastreamMetadata(
-            stream_id="test-stream",
-            neuron_pubkey="pubkey123",
+            stream_name="test-stream",
+            nostr_pubkey="pubkey123",
             name="Test Stream",
             description="Testing",
             encrypted=False,
             price_per_obs=0,
             created_at=1234567890,
+            cadence_seconds=None,
             tags=["test"],
         )
 
         json_str = original.to_json()
         restored = DatastreamMetadata.from_json(json_str)
 
-        assert restored.stream_id == original.stream_id
-        assert restored.neuron_pubkey == original.neuron_pubkey
+        assert restored.stream_name == original.stream_name
+        assert restored.nostr_pubkey == original.nostr_pubkey
         assert restored.encrypted == original.encrypted
         assert restored.tags == original.tags
+
+    def test_is_likely_active_regular_cadence(self):
+        """Test stream health check with regular cadence."""
+        now = int(time.time())
+
+        # Stream with hourly cadence
+        metadata = DatastreamMetadata(
+            stream_name="test",
+            nostr_pubkey="abc",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now - 7200,
+            cadence_seconds=3600,  # Hourly
+            tags=["test"],
+        )
+
+        # Last observation 30 minutes ago - should be active (30 min < 2 * 60 min)
+        last_obs_30min_ago = now - 1800
+        assert metadata.is_likely_active(last_obs_30min_ago) is True
+
+        # Last observation 3 hours ago - should be stale (3 hours > 2 * 1 hour)
+        last_obs_3h_ago = now - 10800
+        assert metadata.is_likely_active(last_obs_3h_ago) is False
+
+    def test_is_likely_active_irregular_cadence(self):
+        """Test stream health check with irregular cadence."""
+        now = int(time.time())
+
+        # Stream with no fixed cadence
+        metadata = DatastreamMetadata(
+            stream_name="test",
+            nostr_pubkey="abc",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now - 172800,
+            cadence_seconds=None,  # Irregular
+            tags=["test"],
+        )
+
+        # Last observation 1 hour ago - should be active (1 hour < 24 hours)
+        last_obs_1h_ago = now - 3600
+        assert metadata.is_likely_active(last_obs_1h_ago) is True
+
+        # Last observation 2 days ago - should be stale (2 days > 24 hours)
+        last_obs_2d_ago = now - 172800
+        assert metadata.is_likely_active(last_obs_2d_ago) is False
+
+    def test_metadata_field_optional(self):
+        """Test that metadata field is optional and defaults to None."""
+        now = int(time.time())
+
+        # Create without metadata
+        stream = DatastreamMetadata(
+            stream_name="test",
+            nostr_pubkey="abc",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"],
+        )
+
+        assert stream.metadata is None
+
+    def test_metadata_field_with_source_info(self):
+        """Test metadata field with source information."""
+        now = int(time.time())
+
+        metadata_dict = {
+            "version": "1.0",
+            "source": {
+                "type": "api",
+                "url": "https://api.example.com/data",
+                "method": "GET"
+            },
+            "target": "price"
+        }
+
+        stream = DatastreamMetadata(
+            stream_name="test",
+            nostr_pubkey="abc",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"],
+            metadata=metadata_dict
+        )
+
+        assert stream.metadata is not None
+        assert stream.metadata["version"] == "1.0"
+        assert stream.metadata["source"]["url"] == "https://api.example.com/data"
+        assert stream.metadata["target"] == "price"
+
+    def test_metadata_field_with_lineage(self):
+        """Test metadata field with data lineage information."""
+        now = int(time.time())
+
+        metadata_dict = {
+            "version": "1.0",
+            "lineage": {
+                "original_source": "Coinbase API",
+                "transformations": ["outlier_removal", "smoothing"],
+                "quality_score": 0.98
+            },
+            "model": {
+                "type": "LSTM",
+                "accuracy": 0.85
+            }
+        }
+
+        stream = DatastreamMetadata(
+            stream_name="btc-prediction",
+            nostr_pubkey="abc",
+            name="Bitcoin Prediction",
+            description="ML prediction",
+            encrypted=True,
+            price_per_obs=10,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["bitcoin", "prediction"],
+            metadata=metadata_dict
+        )
+
+        assert stream.metadata["lineage"]["original_source"] == "Coinbase API"
+        assert "outlier_removal" in stream.metadata["lineage"]["transformations"]
+        assert stream.metadata["model"]["type"] == "LSTM"
+
+    def test_metadata_json_serialization(self):
+        """Test that metadata field serializes/deserializes correctly."""
+        now = int(time.time())
+
+        original = DatastreamMetadata(
+            stream_name="test",
+            nostr_pubkey="abc",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"],
+            metadata={
+                "version": "1.0",
+                "custom_field": "custom_value",
+                "nested": {
+                    "key": "value"
+                }
+            }
+        )
+
+        # Serialize to JSON
+        json_str = original.to_json()
+
+        # Deserialize back
+        restored = DatastreamMetadata.from_json(json_str)
+
+        assert restored.metadata == original.metadata
+        assert restored.metadata["custom_field"] == "custom_value"
+        assert restored.metadata["nested"]["key"] == "value"
+
+    def test_uuid_property(self):
+        """Test that UUID property generates deterministic UUIDs."""
+        now = int(time.time())
+
+        metadata = DatastreamMetadata(
+            stream_name="btc-price",
+            nostr_pubkey="abc123",
+            name="Bitcoin Price",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"]
+        )
+
+        # UUID should be a valid UUID string
+        uuid_str = metadata.uuid
+        assert isinstance(uuid_str, str)
+        assert len(uuid_str) == 36  # Standard UUID format
+        assert uuid_str.count('-') == 4  # UUID has 4 dashes
+
+        # Should be deterministic - same input produces same UUID
+        uuid2 = metadata.uuid
+        assert uuid_str == uuid2
+
+    def test_uuid_deterministic_across_instances(self):
+        """Test that same pubkey+stream_name produces same UUID across instances."""
+        now = int(time.time())
+
+        metadata1 = DatastreamMetadata(
+            stream_name="btc-price",
+            nostr_pubkey="abc123",
+            name="Bitcoin Price",
+            description="Test 1",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"]
+        )
+
+        metadata2 = DatastreamMetadata(
+            stream_name="btc-price",
+            nostr_pubkey="abc123",
+            name="Bitcoin Price (Different Name)",  # Different name
+            description="Test 2",  # Different description
+            encrypted=True,  # Different encryption
+            price_per_obs=10,  # Different price
+            created_at=now + 1000,  # Different timestamp
+            cadence_seconds=60,  # Different cadence
+            tags=["different", "tags"]  # Different tags
+        )
+
+        # Same pubkey + stream_name should produce same UUID
+        # even though all other fields are different
+        assert metadata1.uuid == metadata2.uuid
+
+    def test_uuid_different_for_different_streams(self):
+        """Test that different pubkey or stream_name produces different UUID."""
+        now = int(time.time())
+
+        stream1 = DatastreamMetadata(
+            stream_name="btc-price",
+            nostr_pubkey="abc123",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"]
+        )
+
+        # Different stream_name, same pubkey
+        stream2 = DatastreamMetadata(
+            stream_name="eth-price",  # Different stream_name
+            nostr_pubkey="abc123",
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"]
+        )
+
+        # Same stream_name, different pubkey
+        stream3 = DatastreamMetadata(
+            stream_name="btc-price",
+            nostr_pubkey="xyz789",  # Different pubkey
+            name="Test",
+            description="Test",
+            encrypted=False,
+            price_per_obs=0,
+            created_at=now,
+            cadence_seconds=3600,
+            tags=["test"]
+        )
+
+        # All should have different UUIDs
+        assert stream1.uuid != stream2.uuid
+        assert stream1.uuid != stream3.uuid
+        assert stream2.uuid != stream3.uuid
 
 
 class TestDatastreamObservation:
@@ -102,13 +382,13 @@ class TestDatastreamObservation:
     def test_create_observation(self):
         """Test creating an observation."""
         obs = DatastreamObservation(
-            stream_id="btc-price-usd",
+            stream_name="btc-price-usd",
             timestamp=int(time.time()),
             value={"price": 45000.50, "volume": 123.45},
             seq_num=1,
         )
 
-        assert obs.stream_id == "btc-price-usd"
+        assert obs.stream_name == "btc-price-usd"
         assert obs.seq_num == 1
         assert obs.value["price"] == 45000.50
 
@@ -116,32 +396,32 @@ class TestDatastreamObservation:
         """Test observations with different value types."""
         # Dict value
         obs1 = DatastreamObservation(
-            stream_id="test", timestamp=123, value={"a": 1}, seq_num=1
+            stream_name="test", timestamp=123, value={"a": 1}, seq_num=1
         )
         assert isinstance(obs1.value, dict)
 
         # Number value
         obs2 = DatastreamObservation(
-            stream_id="test", timestamp=123, value=42.5, seq_num=2
+            stream_name="test", timestamp=123, value=42.5, seq_num=2
         )
         assert isinstance(obs2.value, float)
 
         # String value
         obs3 = DatastreamObservation(
-            stream_id="test", timestamp=123, value="hello", seq_num=3
+            stream_name="test", timestamp=123, value="hello", seq_num=3
         )
         assert isinstance(obs3.value, str)
 
         # List value
         obs4 = DatastreamObservation(
-            stream_id="test", timestamp=123, value=[1, 2, 3], seq_num=4
+            stream_name="test", timestamp=123, value=[1, 2, 3], seq_num=4
         )
         assert isinstance(obs4.value, list)
 
     def test_json_round_trip(self):
         """Test JSON serialization round-trip."""
         original = DatastreamObservation(
-            stream_id="test-stream",
+            stream_name="test-stream",
             timestamp=1234567890,
             value={"price": 100, "volume": 50},
             seq_num=42,
@@ -150,7 +430,7 @@ class TestDatastreamObservation:
         json_str = original.to_json()
         restored = DatastreamObservation.from_json(json_str)
 
-        assert restored.stream_id == original.stream_id
+        assert restored.stream_name == original.stream_name
         assert restored.timestamp == original.timestamp
         assert restored.value == original.value
         assert restored.seq_num == original.seq_num
@@ -163,23 +443,23 @@ class TestSubscriptionAnnouncement:
         """Test creating a subscription announcement."""
         sub = SubscriptionAnnouncement(
             subscriber_pubkey="sub123",
-            stream_id="btc-price-usd",
-            provider_pubkey="provider456",
+            stream_name="btc-price-usd",
+            nostr_pubkey="provider456",
             timestamp=int(time.time()),
             payment_channel="lightning:channel123",
         )
 
         assert sub.subscriber_pubkey == "sub123"
-        assert sub.stream_id == "btc-price-usd"
-        assert sub.provider_pubkey == "provider456"
+        assert sub.stream_name == "btc-price-usd"
+        assert sub.nostr_pubkey == "provider456"
         assert sub.payment_channel == "lightning:channel123"
 
     def test_subscription_without_payment_channel(self):
         """Test subscription without payment channel (free stream)."""
         sub = SubscriptionAnnouncement(
             subscriber_pubkey="sub123",
-            stream_id="free-stream",
-            provider_pubkey="provider456",
+            stream_name="free-stream",
+            nostr_pubkey="provider456",
             timestamp=1234567890,
         )
 
@@ -189,8 +469,8 @@ class TestSubscriptionAnnouncement:
         """Test JSON serialization round-trip."""
         original = SubscriptionAnnouncement(
             subscriber_pubkey="sub",
-            stream_id="stream",
-            provider_pubkey="provider",
+            stream_name="stream",
+            nostr_pubkey="provider",
             timestamp=1234567890,
             payment_channel="lightning:xyz",
         )
@@ -199,7 +479,7 @@ class TestSubscriptionAnnouncement:
         restored = SubscriptionAnnouncement.from_json(json_str)
 
         assert restored.subscriber_pubkey == original.subscriber_pubkey
-        assert restored.stream_id == original.stream_id
+        assert restored.stream_name == original.stream_name
         assert restored.payment_channel == original.payment_channel
 
 
@@ -211,7 +491,7 @@ class TestPaymentNotification:
         payment = PaymentNotification(
             from_pubkey="subscriber123",
             to_pubkey="provider456",
-            stream_id="btc-price-usd",
+            stream_name="btc-price-usd",
             seq_num=42,
             amount_sats=10,
             timestamp=int(time.time()),
@@ -220,7 +500,7 @@ class TestPaymentNotification:
 
         assert payment.from_pubkey == "subscriber123"
         assert payment.to_pubkey == "provider456"
-        assert payment.stream_id == "btc-price-usd"
+        assert payment.stream_name == "btc-price-usd"
         assert payment.seq_num == 42
         assert payment.amount_sats == 10
         assert payment.tx_id == "lightning:tx789"
@@ -230,7 +510,7 @@ class TestPaymentNotification:
         payment = PaymentNotification(
             from_pubkey="sub",
             to_pubkey="provider",
-            stream_id="stream",
+            stream_name="stream",
             seq_num=1,
             amount_sats=5,
             timestamp=123,
@@ -243,7 +523,7 @@ class TestPaymentNotification:
         original = PaymentNotification(
             from_pubkey="sub",
             to_pubkey="provider",
-            stream_id="stream",
+            stream_name="stream",
             seq_num=10,
             amount_sats=100,
             timestamp=1234567890,
@@ -265,21 +545,21 @@ class TestInboundModels:
     def test_inbound_observation(self):
         """Test InboundObservation wrapper."""
         obs = DatastreamObservation(
-            stream_id="test",
+            stream_name="test",
             timestamp=123,
             value={"data": 42},
             seq_num=1,
         )
 
         inbound = InboundObservation(
-            stream_id="test",
-            provider_pubkey="provider123",
+            stream_name="test",
+            nostr_pubkey="provider123",
             observation=obs,
             event_id="event456",
         )
 
-        assert inbound.stream_id == "test"
-        assert inbound.provider_pubkey == "provider123"
+        assert inbound.stream_name == "test"
+        assert inbound.nostr_pubkey == "provider123"
         assert inbound.observation.value["data"] == 42
         assert inbound.event_id == "event456"
         assert inbound.raw_event is None
@@ -289,7 +569,7 @@ class TestInboundModels:
         payment = PaymentNotification(
             from_pubkey="sub",
             to_pubkey="provider",
-            stream_id="stream",
+            stream_name="stream",
             seq_num=5,
             amount_sats=10,
             timestamp=123,

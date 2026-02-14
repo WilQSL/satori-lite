@@ -48,19 +48,21 @@ async def main():
     print("✓ Connected to Nostr relays\n")
 
     # Announce a datastream
+    now = int(time.time())
     metadata = DatastreamMetadata(
-        stream_id="demo-bitcoin-price",
-        neuron_pubkey=client.pubkey(),
+        stream_name="demo-bitcoin-price",
+        nostr_pubkey=client.pubkey(),
         name="Demo Bitcoin Price (USD)",
         description="Simulated BTC/USD price feed - demo only",
         encrypted=True,
         price_per_obs=10,  # 10 sats per observation
-        created_at=int(time.time()),
+        created_at=now,
+        cadence_seconds=30,  # Publishes every 30 seconds
         tags=["demo", "bitcoin", "price", "usd"]
     )
 
     event_id = await client.announce_datastream(metadata)
-    print(f"✓ Datastream announced: {metadata.stream_id}")
+    print(f"✓ Datastream announced: {metadata.stream_name}")
     print(f"  Event ID: {event_id}\n")
 
     # Start monitoring for payments
@@ -72,7 +74,7 @@ async def main():
             print(f"\n💰 Payment received!")
             print(f"   From: {payment.payment.from_pubkey[:16]}...")
             print(f"   Amount: {payment.payment.amount_sats} sats")
-            print(f"   Stream: {payment.payment.stream_id}")
+            print(f"   Stream: {payment.payment.stream_name}")
             print(f"   Seq #: {payment.payment.seq_num}")
 
     payment_task = asyncio.create_task(monitor_payments())
@@ -90,7 +92,7 @@ async def main():
             volume = 100 + (seq_num * 5)
 
             observation = DatastreamObservation(
-                stream_id="demo-bitcoin-price",
+                stream_name="demo-bitcoin-price",
                 timestamp=int(time.time()),
                 value={
                     "price": price,

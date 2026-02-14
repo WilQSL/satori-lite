@@ -51,7 +51,7 @@ from .encryption import (
 class SubscriberState:
     """Tracks state for a single subscriber to a datastream."""
     subscriber_pubkey: str
-    stream_id: str
+    stream_name: str
     last_paid_seq: int | None = None  # Last seq_num they paid for
     payment_channel: str | None = None
     subscribed_at: int = 0  # Unix timestamp
@@ -121,7 +121,7 @@ class SatoriNostr:
         self._dedupe = DedupeCache()
 
         # Subscriber tracking (for providers)
-        # stream_id -> {subscriber_pubkey -> SubscriberState}
+        # stream_name -> {subscriber_pubkey -> SubscriberState}
         self._subscribers: dict[str, dict[str, SubscriberState]] = {}
 
         # Track announced streams (for providers)
@@ -231,7 +231,7 @@ class SatoriNostr:
 
         # Build tags for discovery
         tags = [
-            Tag.parse(["d", metadata.stream_id]),  # Replaceable event identifier
+            Tag.parse(["d", metadata.stream_name]),  # Replaceable event identifier
             Tag.parse(["satori", "datastream"]),
         ]
 
@@ -240,7 +240,7 @@ class SatoriNostr:
             tags.append(Tag.parse(["t", tag]))
 
         # Add stream topic tag
-        tags.append(Tag.parse(["stream", compute_stream_topic_tag(metadata.stream_id)]))
+        tags.append(Tag.parse(["stream", compute_stream_topic_tag(metadata.stream_name)]))
 
         # Build event with metadata as content
         event = EventBuilder(
@@ -253,7 +253,7 @@ class SatoriNostr:
         event_id = await self._client.send_event(event)
 
         # Track announced stream
-        self._announced_streams[metadata.stream_id] = metadata
+        self._announced_streams[metadata.stream_name] = metadata
 
         return event_id.to_hex()
 
@@ -280,11 +280,11 @@ class SatoriNostr:
         if not self._running or not self._client:
             raise RuntimeError("Client not running")
 
-        stream_id = observation.stream_id
+        stream_name = observation.stream_name
         seq_num = observation.seq_num
 
         # Get subscribers for this stream
-        stream_subscribers = self._subscribers.get(stream_id, {})
+        stream_subscribers = self._subscribers.get(stream_name, {})
 
         event_ids = []
 
@@ -312,7 +312,7 @@ class SatoriNostr:
                     # Using kind 30101 with encrypted content
                     tags = [
                         Tag.parse(["p", sub_pubkey]),  # Recipient
-                        Tag.parse(["stream", stream_id]),
+                        Tag.parse(["stream", stream_name]),
                         Tag.parse(["seq", str(seq_num)]),
                     ]
 
@@ -334,21 +334,21 @@ class SatoriNostr:
 
         return event_ids
 
-    def get_subscribers(self, stream_id: str) -> list[str]:
+    def get_subscribers(self, stream_name: str) -> list[str]:
         """Get list of subscriber pubkeys for a stream (provider).
 
         Args:
-            stream_id: Stream identifier
+            stream_name: Stream identifier
 
         Returns:
             List of subscriber public keys (hex)
         """
-        stream_subscribers = self._subscribers.get(stream_id, {})
+        stream_subscribers = self._subscribers.get(stream_name, {})
         return list(stream_subscribers.keys())
 
     def record_subscription(
         self,
-        stream_id: str,
+        stream_name: str,
         subscriber_pubkey: str,
         payment_channel: str | None = None
     ) -> None:
@@ -357,16 +357,16 @@ class SatoriNostr:
         Called when a subscription announcement is received.
 
         Args:
-            stream_id: Stream identifier
+            stream_name: Stream identifier
             subscriber_pubkey: Subscriber's public key (hex)
             payment_channel: Optional payment channel info
         """
-        if stream_id not in self._subscribers:
-            self._subscribers[stream_id] = {}
+        if stream_name not in self._subscribers:
+            self._subscribers[stream_name] = {}
 
-        self._subscribers[stream_id][subscriber_pubkey] = SubscriberState(
+        self._subscribers[stream_name][subscriber_pubkey] = SubscriberState(
             subscriber_pubkey=subscriber_pubkey,
-            stream_id=stream_id,
+            stream_name=stream_name,
             last_paid_seq=None,
             payment_channel=payment_channel,
             subscribed_at=int(time.time()),
@@ -374,7 +374,7 @@ class SatoriNostr:
 
     def record_payment(
         self,
-        stream_id: str,
+        stream_name: str,
         subscriber_pubkey: str,
         seq_num: int
     ) -> None:
@@ -383,13 +383,13 @@ class SatoriNostr:
         Updates the subscriber's last_paid_seq to grant access to observations.
 
         Args:
-            stream_id: Stream identifier
+            stream_name: Stream identifier
             subscriber_pubkey: Subscriber's public key (hex)
             seq_num: Observation sequence number they paid for
         """
-        if stream_id in self._subscribers:
-            if subscriber_pubkey in self._subscribers[stream_id]:
-                sub_state = self._subscribers[stream_id][subscriber_pubkey]
+        if stream_name in self._subscribers:
+            if subscriber_pubkey in self._subscribers[stream_name]:
+                sub_state = self._subscribers[stream_name][subscriber_pubkey]
                 # Update to highest paid seq
                 if sub_state.last_paid_seq is None or seq_num > sub_state.last_paid_seq:
                     sub_state.last_paid_seq = seq_num
@@ -442,9 +442,90 @@ class SatoriNostr:
 
         return datastreams
 
+    async def get_last_observation_time(self, stream_name: str) -> int | None:
+        """Get timestamp of the last published observation for a stream.
+
+        Queries relays for the most recent observation event (kind 30101) for the stream.
+        Note: Event timestamps are public even if content is encrypted.
+
+        Args:
+            stream_name: Stream identifier
+
+        Returns:
+            Unix timestamp of last observation, or None if no observations found
+
+        Raises:
+            RuntimeError: If client not running
+
+        Example:
+            >>> last_time = await client.get_last_observation_time("btc-price")
+            >>> if last_time:
+            ...     age = time.time() - last_time
+            ...     print(f"Last observation was {age} seconds ago")
+        """
+        if not self._running or not self._client:
+            raise RuntimeError("Client not running")
+
+        # Query for latest observation event for this stream
+        # The event timestamp is public even if content is encrypted
+        filter_builder = (
+            Filter()
+            .kind(Kind(KIND_DATASTREAM_DATA))
+            .custom_tag("stream", stream_name)
+            .limit(1)
+        )
+
+        events = await self._client.get_events_of([filter_builder])
+
+        if events:
+            # Nostr SDK returns events sorted by timestamp (newest first)
+            return events[0].created_at().as_secs()
+
+        return None
+
+    async def discover_active_datastreams(
+        self,
+        tags: list[str] | None = None,
+        limit: int = 100,
+        max_staleness_multiplier: float = 2.0
+    ) -> list[DatastreamMetadata]:
+        """Discover datastreams that are likely still active (subscriber).
+
+        Queries relays for latest observation timestamps and filters based on cadence.
+
+        Args:
+            tags: Optional list of tags to filter by
+            limit: Maximum number of results
+            max_staleness_multiplier: How many cadence periods before considering stale
+
+        Returns:
+            List of datastream metadata that appear to be actively publishing
+
+        Raises:
+            RuntimeError: If client not running
+
+        Example:
+            >>> # Find active Bitcoin streams
+            >>> active = await client.discover_active_datastreams(tags=["bitcoin"])
+            >>> for stream in active:
+            ...     last_time = await client.get_last_observation_time(stream.stream_name)
+            ...     print(f"{stream.name}: last observation at {last_time}")
+        """
+        # Get all matching streams
+        all_streams = await self.discover_datastreams(tags=tags, limit=limit)
+
+        # Filter to only active streams by checking last observation time
+        active_streams = []
+        for stream in all_streams:
+            last_obs_time = await self.get_last_observation_time(stream.stream_name)
+            if last_obs_time and stream.is_likely_active(last_obs_time, max_staleness_multiplier):
+                active_streams.append(stream)
+
+        return active_streams
+
     async def subscribe_datastream(
         self,
-        stream_id: str,
+        stream_name: str,
         provider_pubkey: str,
         payment_channel: str | None = None
     ) -> str:
@@ -453,7 +534,7 @@ class SatoriNostr:
         Publishes a subscription announcement (kind 30102, public).
 
         Args:
-            stream_id: Stream identifier to subscribe to
+            stream_name: Stream identifier to subscribe to
             provider_pubkey: Provider's public key (hex)
             payment_channel: Optional payment channel info
 
@@ -469,8 +550,8 @@ class SatoriNostr:
         # Create subscription announcement
         sub = SubscriptionAnnouncement(
             subscriber_pubkey=self.pubkey(),
-            stream_id=stream_id,
-            provider_pubkey=provider_pubkey,
+            stream_name=stream_name,
+            nostr_pubkey=provider_pubkey,
             timestamp=int(time.time()),
             payment_channel=payment_channel,
         )
@@ -478,7 +559,7 @@ class SatoriNostr:
         # Build tags
         tags = [
             Tag.parse(["p", provider_pubkey]),  # Tag provider
-            Tag.parse(["stream", stream_id]),
+            Tag.parse(["stream", stream_name]),
             Tag.parse(["satori", "subscription"]),
         ]
 
@@ -499,7 +580,7 @@ class SatoriNostr:
     async def send_payment(
         self,
         provider_pubkey: str,
-        stream_id: str,
+        stream_name: str,
         seq_num: int,
         amount_sats: int,
         tx_id: str | None = None
@@ -510,7 +591,7 @@ class SatoriNostr:
 
         Args:
             provider_pubkey: Provider's public key (hex)
-            stream_id: Stream identifier
+            stream_name: Stream identifier
             seq_num: Observation sequence number being paid for
             amount_sats: Payment amount in satoshis
             tx_id: Optional transaction/payment proof
@@ -528,7 +609,7 @@ class SatoriNostr:
         payment = PaymentNotification(
             from_pubkey=self.pubkey(),
             to_pubkey=provider_pubkey,
-            stream_id=stream_id,
+            stream_name=stream_name,
             seq_num=seq_num,
             amount_sats=amount_sats,
             timestamp=int(time.time()),
@@ -543,7 +624,7 @@ class SatoriNostr:
         # Build tags
         tags = [
             Tag.parse(["p", provider_pubkey]),
-            Tag.parse(["stream", stream_id]),
+            Tag.parse(["stream", stream_name]),
             Tag.parse(["seq", str(seq_num)]),
         ]
 
@@ -607,11 +688,11 @@ class SatoriNostr:
     # UTILITY APIs
     # ========================================================================
 
-    async def get_datastream(self, stream_id: str) -> DatastreamMetadata | None:
+    async def get_datastream(self, stream_name: str) -> DatastreamMetadata | None:
         """Get metadata for a specific datastream by ID.
 
         Args:
-            stream_id: Stream identifier to look up
+            stream_name: Stream identifier to look up
 
         Returns:
             DatastreamMetadata if found, None otherwise
@@ -623,7 +704,7 @@ class SatoriNostr:
             raise RuntimeError("Client not running")
 
         # Query for this specific stream
-        filter_obj = Filter().kind(Kind(KIND_DATASTREAM_ANNOUNCE)).custom_tag("d", [stream_id])
+        filter_obj = Filter().kind(Kind(KIND_DATASTREAM_ANNOUNCE)).custom_tag("d", [stream_name])
 
         events = await self._client.get_events_of([filter_obj])
 
@@ -645,13 +726,13 @@ class SatoriNostr:
         """
         return list(self._announced_streams.values())
 
-    async def unsubscribe_datastream(self, stream_id: str, provider_pubkey: str) -> str:
+    async def unsubscribe_datastream(self, stream_name: str, provider_pubkey: str) -> str:
         """Unsubscribe from a datastream.
 
         Publishes an unsubscription announcement (kind 30102 with unsubscribe tag).
 
         Args:
-            stream_id: Stream identifier to unsubscribe from
+            stream_name: Stream identifier to unsubscribe from
             provider_pubkey: Provider's public key (hex)
 
         Returns:
@@ -666,8 +747,8 @@ class SatoriNostr:
         # Create unsubscription announcement
         unsub = SubscriptionAnnouncement(
             subscriber_pubkey=self.pubkey(),
-            stream_id=stream_id,
-            provider_pubkey=provider_pubkey,
+            stream_name=stream_name,
+            nostr_pubkey=provider_pubkey,
             timestamp=int(time.time()),
             payment_channel=None,
         )
@@ -675,7 +756,7 @@ class SatoriNostr:
         # Build tags with unsubscribe marker
         tags = [
             Tag.parse(["p", provider_pubkey]),
-            Tag.parse(["stream", stream_id]),
+            Tag.parse(["stream", stream_name]),
             Tag.parse(["action", "unsubscribe"]),  # Mark as unsubscribe
             Tag.parse(["satori", "unsubscription"]),
         ]
@@ -704,29 +785,29 @@ class SatoriNostr:
         """
         return self._stats.copy()
 
-    def get_subscriber_info(self, stream_id: str, subscriber_pubkey: str) -> SubscriberState | None:
+    def get_subscriber_info(self, stream_name: str, subscriber_pubkey: str) -> SubscriberState | None:
         """Get information about a specific subscriber (provider).
 
         Args:
-            stream_id: Stream identifier
+            stream_name: Stream identifier
             subscriber_pubkey: Subscriber's public key (hex)
 
         Returns:
             SubscriberState if subscriber exists, None otherwise
         """
-        stream_subs = self._subscribers.get(stream_id, {})
+        stream_subs = self._subscribers.get(stream_name, {})
         return stream_subs.get(subscriber_pubkey)
 
-    def get_all_subscribers_info(self, stream_id: str) -> dict[str, SubscriberState]:
+    def get_all_subscribers_info(self, stream_name: str) -> dict[str, SubscriberState]:
         """Get information about all subscribers to a stream (provider).
 
         Args:
-            stream_id: Stream identifier
+            stream_name: Stream identifier
 
         Returns:
             Dictionary mapping subscriber pubkeys to their SubscriberState
         """
-        return self._subscribers.get(stream_id, {}).copy()
+        return self._subscribers.get(stream_name, {}).copy()
 
     # ========================================================================
     # INTERNAL - Event Processing
@@ -800,8 +881,8 @@ class SatoriNostr:
 
             # Create inbound observation
             inbound = InboundObservation(
-                stream_id=observation.stream_id,
-                provider_pubkey=sender_pubkey.to_hex(),
+                stream_name=observation.stream_name,
+                nostr_pubkey=sender_pubkey.to_hex(),
                 observation=observation,
                 event_id=event.id().to_hex(),
             )
@@ -829,7 +910,7 @@ class SatoriNostr:
 
             # Record payment in subscriber state
             self.record_payment(
-                payment.stream_id,
+                payment.stream_name,
                 payment.from_pubkey,
                 payment.seq_num
             )
@@ -858,9 +939,9 @@ class SatoriNostr:
             sub = SubscriptionAnnouncement.from_json(event.content())
 
             # If I'm the provider, record this subscription
-            if sub.provider_pubkey == self.pubkey():
+            if sub.nostr_pubkey == self.pubkey():
                 self.record_subscription(
-                    sub.stream_id,
+                    sub.stream_name,
                     sub.subscriber_pubkey,
                     sub.payment_channel
                 )

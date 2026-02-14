@@ -50,6 +50,7 @@ class TestProviderSubscriberFlow:
             await subscriber.start()
 
             # Provider announces a datastream
+            now = int(time.time())
             metadata = DatastreamMetadata(
                 stream_id="test-stream-1",
                 neuron_pubkey=provider.pubkey(),
@@ -57,7 +58,8 @@ class TestProviderSubscriberFlow:
                 description="Integration test stream",
                 encrypted=False,
                 price_per_obs=0,  # Free stream
-                created_at=int(time.time()),
+                created_at=now,
+                cadence_seconds=3600,
                 tags=["test", "integration"],
             )
 
@@ -134,6 +136,7 @@ class TestProviderSubscriberFlow:
             )
 
             # Create metadata for free stream
+            now = int(time.time())
             metadata = DatastreamMetadata(
                 stream_id="free-stream",
                 neuron_pubkey=provider.pubkey(),
@@ -141,7 +144,8 @@ class TestProviderSubscriberFlow:
                 description="No payment required",
                 encrypted=True,
                 price_per_obs=0,  # Free!
-                created_at=int(time.time()),
+                created_at=now,
+                cadence_seconds=60,
                 tags=["free"],
             )
 
@@ -185,6 +189,7 @@ class TestProviderSubscriberFlow:
             )
 
             # Create metadata for paid stream
+            now = int(time.time())
             metadata = DatastreamMetadata(
                 stream_id="paid-stream",
                 neuron_pubkey=provider.pubkey(),
@@ -192,7 +197,8 @@ class TestProviderSubscriberFlow:
                 description="Requires payment",
                 encrypted=True,
                 price_per_obs=10,  # 10 sats per observation
-                created_at=int(time.time()),
+                created_at=now,
+                cadence_seconds=60,
                 tags=["paid"],
             )
 
@@ -261,6 +267,7 @@ class TestProviderSubscriberFlow:
             provider.record_payment("multi-stream", sub2_pubkey, seq_num=1)
 
             # Create paid stream metadata
+            now = int(time.time())
             metadata = DatastreamMetadata(
                 stream_id="multi-stream",
                 neuron_pubkey=provider.pubkey(),
@@ -268,7 +275,8 @@ class TestProviderSubscriberFlow:
                 description="Testing multiple subscribers",
                 encrypted=True,
                 price_per_obs=5,
-                created_at=int(time.time()),
+                created_at=now,
+                cadence_seconds=60,
                 tags=["multi"],
             )
 
@@ -341,6 +349,7 @@ class TestProviderSubscriberFlow:
                 subscriber_pubkey=subscriber.pubkey(),
             )
 
+            now = int(time.time())
             metadata = DatastreamMetadata(
                 stream_id="sparse-stream",
                 neuron_pubkey=provider.pubkey(),
@@ -348,7 +357,8 @@ class TestProviderSubscriberFlow:
                 description="Infrequent observations",
                 encrypted=True,
                 price_per_obs=0,
-                created_at=int(time.time()),
+                created_at=now,
+                cadence_seconds=86400,  # Daily sparse stream
                 tags=["sparse"],
             )
 
@@ -454,6 +464,7 @@ class TestErrorHandling:
         """Test that operations fail when client not running."""
         client = SatoriNostr(provider_config)
 
+        now = int(time.time())
         metadata = DatastreamMetadata(
             stream_id="test",
             neuron_pubkey=client.pubkey(),
@@ -461,7 +472,8 @@ class TestErrorHandling:
             description="Test",
             encrypted=False,
             price_per_obs=0,
-            created_at=int(time.time()),
+            created_at=now,
+            cadence_seconds=3600,
             tags=[],
         )
 
