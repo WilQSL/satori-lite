@@ -98,6 +98,11 @@ class EngineStorageManager:
         # Convert from storage format to engine format
         df = df.reset_index()
         df = df.rename(columns={'ts': 'date_time', 'hash': 'id'})
+
+        # Convert Unix timestamp to datetime if needed
+        if not pd.api.types.is_datetime64_any_dtype(df['date_time']):
+            df['date_time'] = pd.to_datetime(df['date_time'], unit='s', utc=True)
+
         if 'provider' in df.columns:
             df = df.drop(columns=['provider'])
         return df

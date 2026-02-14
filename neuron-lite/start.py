@@ -268,6 +268,34 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.error(f"Error collecting and submitting predictions: {e}", color='red')
 
+    def logTrainingQueueStatus(self):
+        """Log training queue statistics for monitoring."""
+        try:
+            if self.aiengine is None:
+                return
+
+            # Import the queue manager getter
+            from satoriengine.veda.training.queue_manager import get_training_manager
+
+            manager = get_training_manager()
+            status = manager.get_queue_status()
+
+            if status['worker_alive']:
+                if status['current']:
+                    logging.info(
+                        f"Training Queue: {status['queued']} waiting, "
+                        f"currently training: {status['current']}",
+                        color='cyan')
+                else:
+                    logging.info(
+                        f"Training Queue: {status['queued']} waiting, worker idle",
+                        color='cyan')
+            else:
+                logging.warning("Training queue worker is not running!", color='yellow')
+
+        except Exception as e:
+            logging.error(f"Error logging training queue status: {e}", color='red')
+
     def pollObservationsForever(self):
         """
         Poll the central server for new observations.
@@ -379,7 +407,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                         # Choose and initialize appropriate adapter
                                         self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
 
-                                        logging.info(f"✓ Created model for stream: {stream_name} (UUID: {stream_uuid[:8]}...)", color='magenta')
+                                        # Start training thread for this stream
+                                        try:
+                                            self.aiengine.streamModels[stream_uuid].run_forever()
+                                        except Exception as e:
+                                            logging.error(f"Failed to start training thread for {stream_name}: {e}", color='red')
                                     except Exception as e:
                                         logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
                                         import traceback
@@ -402,6 +434,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                     # After processing all observations, collect predictions and submit in batch
                     self.collectAndSubmitPredictions()
+
+                    # Log training queue status
+                    self.logTrainingQueueStatus()
 
                 except Exception as e:
                     logging.error(f"Error polling observations: {e}", color='red')
@@ -655,7 +690,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.subscriptions = [subscription]
         self.publications = [publication]
 
-        logging.info(f"Default stream configured: {sub_id.uuid}", color="green")
+        # Suppress log for default stream to reduce noise
+        # logging.info(f"Default stream configured: {sub_id.uuid}", color="green")
 
     def spawnEngine(self):
         """Spawn the AI Engine with stream assignments from Neuron"""
@@ -674,6 +710,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             def runEngine():
                 try:
                     self.aiengine.initializeFromNeuron()
+
+                    # Start training threads for initial stream models only
+                    # Additional models will be created dynamically when observations arrive
+                    for stream_uuid, model in self.aiengine.streamModels.items():
+                        try:
+                            model.run_forever()
+                        except Exception as e:
+                            logging.error(f"Failed to start training thread for {stream_uuid}: {e}")
+
+                    logging.info("Models will be created dynamically when observations arrive", color="cyan")
+
+                    # Keep engine thread alive
                     while True:
                         time.sleep(60)
                 except Exception as e:

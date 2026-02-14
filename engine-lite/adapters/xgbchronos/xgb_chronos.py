@@ -12,7 +12,7 @@ import datetime
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
-from satorilib.logging import info, debug, warning
+from satorilib.logging import info, debug, warning, error
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
 from satoriengine.veda.adapters.xgbchronos.chronos_adapter import PretrainedChronosAdapter
 
@@ -50,11 +50,22 @@ class XgbChronosAdapter(ModelAdapter):
     def _load(modelPath: str, **kwargs) -> Union[None, XGBRegressor]:
         """loads and returns the model model from disk if present"""
         try:
-            return joblib.load(modelPath)
+            loaded = joblib.load(modelPath)
+            info(f"Successfully loaded model from {modelPath}", color='green')
+            return loaded
         except Exception as e:
-            debug(f"unable to load model file, creating a new one: {e}", print=True)
             if os.path.isfile(modelPath):
-                os.remove(modelPath)
+                # Only delete if file is actually corrupt
+                if "pickle" in str(e).lower() or "corrupt" in str(e).lower() or "truncated" in str(e).lower():
+                    warning(f"Model file appears corrupted, deleting: {modelPath}. Error: {e}")
+                    try:
+                        os.remove(modelPath)
+                    except Exception as del_err:
+                        error(f"Failed to delete corrupted model: {del_err}")
+                else:
+                    warning(f"Failed to load model (keeping file for retry): {e}")
+            else:
+                debug(f"Model file does not exist: {modelPath}")
             return None
 
     def load(self, modelPath: str, **kwargs) -> Union[None, XGBRegressor]:
@@ -89,9 +100,10 @@ class XgbChronosAdapter(ModelAdapter):
                 'stableModel': model,
                 'modelError': modelError,
                 'dataset': dataset}, modelPath)
+            info(f"Successfully saved model to {modelPath} (error: {modelError:.4f})", color='green')
             return True
         except Exception as e:
-            warning(f"Error saving model: {e}")
+            error(f"Failed to save model to {modelPath}: {e}")
             return False
 
     def save(self, modelPath: str = None, **kwargs) -> bool:
@@ -104,9 +116,10 @@ class XgbChronosAdapter(ModelAdapter):
                 'stableModel': self.model,
                 'modelError': self.modelError,
                 'dataset': self.dataset}, modelPath)
+            info(f"Successfully saved model to {modelPath} (error: {self.modelError:.4f})", color='green')
             return True
         except Exception as e:
-            warning(f"Error saving model: {e}")
+            error(f"Failed to save model to {modelPath}: {e}")
             return False
 
     def compare(self, other: Union[ModelAdapter, None] = None, **kwargs) -> bool:
