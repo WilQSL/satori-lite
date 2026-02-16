@@ -363,6 +363,7 @@
                     <div class="mb-3">
                         <label class="form-label">Relay URL</label>
                         <input type="text" class="form-control" id="relayUrl"
+                               value="{{ relay_url or '' }}"
                                placeholder="wss://your-relay.example.com">
                         <small class="form-text text-muted">
                             WebSocket URL of your Nostr relay (must have NIP-11 configured with your pubkey)

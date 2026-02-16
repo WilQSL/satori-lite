@@ -110,6 +110,7 @@ class SatoriServerClient(object):
             self._access_token = data['access_token']
             self._refresh_token = data['refresh_token']
             self._token_expiry = datetime.now() + timedelta(seconds=data['expires_in'])
+            self.relayUrl = data.get('relay_url')
 
             logging.info('JWT login successful', print=True)
         except Exception as e:

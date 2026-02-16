@@ -518,16 +518,19 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not derive eth_wallet_address: {e}")
 
-        # Get nostr pubkey from startup instance
+        # Get nostr pubkey and relay URL from startup instance
         nostr_pubkey = None
+        relay_url = None
         try:
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 nostr_pubkey = startup.nostrPubkey
+            if startup and hasattr(startup, 'server') and startup.server:
+                relay_url = getattr(startup.server, 'relayUrl', None)
         except Exception as e:
-            logger.warning(f"Could not get nostr pubkey: {e}")
+            logger.warning(f"Could not get nostr/relay info: {e}")
 
-        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address, nostr_pubkey=nostr_pubkey)
+        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address, nostr_pubkey=nostr_pubkey, relay_url=relay_url)
 
     @app.route('/stake')
     @login_required

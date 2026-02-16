@@ -287,50 +287,58 @@ class SatoriNostr:
         stream_subscribers = self._subscribers.get(stream_name, {})
 
         event_ids = []
+        obs_json = observation.to_json()
 
-        # Send to each paid subscriber
-        for sub_pubkey, sub_state in stream_subscribers.items():
-            # Check if subscriber has paid for this observation
-            if stream_metadata.price_per_obs == 0:
-                # Free stream - send to all subscribers
-                should_send = True
-            elif sub_state.last_paid_seq is not None and sub_state.last_paid_seq >= seq_num:
-                # Subscriber has paid for this seq_num
-                should_send = True
-            else:
-                # Not paid yet - skip
-                should_send = False
+        if stream_metadata.price_per_obs == 0:
+            # Free stream: broadcast a single event (not per-subscriber)
+            content = obs_json
+            if stream_metadata.encrypted:
+                # Encrypted broadcast: encrypt with provider's own key
+                content = encrypt_observation(
+                    obs_json, self._keys.public_key(), self._keys)
 
-            if should_send:
-                try:
-                    # Encrypt observation for this subscriber
-                    obs_json = observation.to_json()
-                    recipient_pubkey = PublicKey.parse(sub_pubkey)
-                    encrypted = encrypt_observation(obs_json, recipient_pubkey, self._keys)
+            tags = [
+                Tag.parse(["stream", stream_name]),
+                Tag.parse(["seq", str(seq_num)]),
+                Tag.parse(["satori", "observation"]),
+            ]
 
-                    # Send as encrypted DM (kind 4 or custom kind 30101)
-                    # Using kind 30101 with encrypted content
-                    tags = [
-                        Tag.parse(["p", sub_pubkey]),  # Recipient
-                        Tag.parse(["stream", stream_name]),
-                        Tag.parse(["seq", str(seq_num)]),
-                    ]
+            event = EventBuilder(
+                Kind(KIND_DATASTREAM_DATA),
+                content,
+                tags
+            ).to_event(self._keys)
 
-                    event = EventBuilder(
-                        Kind(KIND_DATASTREAM_DATA),
-                        encrypted,
-                        tags
-                    ).to_event(self._keys)
+            event_id = await self._client.send_event(event)
+            event_ids.append(event_id.to_hex())
+            self._stats["observations_sent"] += 1
+        else:
+            # Paid stream: encrypt and send per subscriber
+            for sub_pubkey, sub_state in stream_subscribers.items():
+                if sub_state.last_paid_seq is not None and sub_state.last_paid_seq >= seq_num:
+                    try:
+                        recipient_pubkey = PublicKey.parse(sub_pubkey)
+                        encrypted = encrypt_observation(
+                            obs_json, recipient_pubkey, self._keys)
 
-                    event_id = await self._client.send_event(event)
-                    event_ids.append(event_id.to_hex())
+                        tags = [
+                            Tag.parse(["p", sub_pubkey]),
+                            Tag.parse(["stream", stream_name]),
+                            Tag.parse(["seq", str(seq_num)]),
+                        ]
 
-                    # Update statistics
-                    self._stats["observations_sent"] += 1
+                        event = EventBuilder(
+                            Kind(KIND_DATASTREAM_DATA),
+                            encrypted,
+                            tags
+                        ).to_event(self._keys)
 
-                except Exception as e:
-                    # Log error but continue with other subscribers
-                    print(f"Error sending to {sub_pubkey}: {e}")
+                        event_id = await self._client.send_event(event)
+                        event_ids.append(event_id.to_hex())
+                        self._stats["observations_sent"] += 1
+
+                    except Exception as e:
+                        print(f"Error sending to {sub_pubkey}: {e}")
 
         return event_ids
 
@@ -820,8 +828,10 @@ class SatoriNostr:
 
         # Subscribe to relevant event kinds
         filters = [
-            # Observations sent to me (kind 30101)
+            # Encrypted observations sent to me (kind 30101, tagged with my pubkey)
             Filter().kind(Kind(KIND_DATASTREAM_DATA)).pubkey(self._keys.public_key()),
+            # Free broadcast observations (kind 30101, no p-tag / not addressed to anyone specific)
+            Filter().kind(Kind(KIND_DATASTREAM_DATA)).custom_tag("satori", "observation"),
             # Payments sent to me (kind 30103)
             Filter().kind(Kind(KIND_PAYMENT)).pubkey(self._keys.public_key()),
             # Subscription announcements (kind 30102) - if I'm a provider
@@ -870,16 +880,23 @@ class SatoriNostr:
             await self._handle_subscription_event(event)
 
     async def _handle_observation_event(self, event: Event) -> None:
-        """Handle an observation data event (kind 30101)."""
+        """Handle an observation data event (kind 30101).
+
+        Free streams broadcast plaintext content.
+        Paid streams encrypt per-subscriber via NIP-04.
+        """
         try:
-            # Decrypt observation
             sender_pubkey = event.author()
-            encrypted_content = event.content()
+            content = event.content()
 
-            obs_json = decrypt_observation(encrypted_content, sender_pubkey, self._keys)
-            observation = DatastreamObservation.from_json(obs_json)
+            # Try plaintext first (free broadcast), fall back to decryption (paid)
+            try:
+                observation = DatastreamObservation.from_json(content)
+            except Exception:
+                # Not valid JSON / not plaintext - try decrypting
+                obs_json = decrypt_observation(content, sender_pubkey, self._keys)
+                observation = DatastreamObservation.from_json(obs_json)
 
-            # Create inbound observation
             inbound = InboundObservation(
                 stream_name=observation.stream_name,
                 nostr_pubkey=sender_pubkey.to_hex(),
@@ -887,10 +904,7 @@ class SatoriNostr:
                 event_id=event.id().to_hex(),
             )
 
-            # Queue for consumer
             await self._observation_queue.put(inbound)
-
-            # Update statistics
             self._stats["observations_received"] += 1
 
         except EncryptionError as e:
