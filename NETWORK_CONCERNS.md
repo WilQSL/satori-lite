@@ -7,11 +7,10 @@ If the neuron restarts, this set is empty, so on first reconcile pass it
 re-announces subscriptions (kind 30102 events) to every relay for every
 stream. Not harmful but noisy — publishes duplicate subscription announcements.
 
-## 4. No actual data flow yet
-We subscribe (announce kind 30102) and discover, but nobody is consuming
-observations. The `client.observations()` async iterator isn't being read.
-We're telling providers we're subscribed but not receiving their data.
-This is the next piece to build.
+## 4. ~~No actual data flow~~ (FIXED)
+Observation listeners run per-relay via `_networkListen()`. Each reads
+from `client.observations()` and saves to the local SQLite DB. Listeners
+start when the hunt finds active streams and are cancelled on disconnect.
 
 ## 5. ~~Central is a single point of failure for relay discovery~~ (FIXED)
 Both the reconciliation loop and on-demand discovery now fall back to

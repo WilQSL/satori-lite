@@ -70,6 +70,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.nostrPubkey: Optional[str] = self._initNostrKeys()
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
+        self._networkListeners: dict = {}  # relay_url -> asyncio.Task
+        self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
         self.latestObservationTime: float = 0
@@ -211,7 +213,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return None
 
     async def _networkDisconnect(self, relay_url: str):
-        """Disconnect from a relay."""
+        """Disconnect from a relay and cancel its observation listener."""
+        task = self._networkListeners.pop(relay_url, None)
+        if task and not task.done():
+            task.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -230,6 +235,33 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return None, False
         except Exception:
             return None, False
+
+    async def _networkListen(self, relay_url: str):
+        """Listen for observations on a relay and save them to the DB."""
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for obs in client.observations():
+                await asyncio.to_thread(
+                    self.networkDB.save_observation,
+                    obs.stream_name,
+                    obs.nostr_pubkey,
+                    obs.observation.to_json() if obs.observation else None,
+                    obs.event_id)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Network: listener stopped on {relay_url}: {e}')
+
+    def _networkEnsureListener(self, relay_url: str):
+        """Start an observation listener for a relay if one isn't running."""
+        task = self._networkListeners.get(relay_url)
+        if task and not task.done():
+            return
+        self._networkListeners[relay_url] = asyncio.ensure_future(
+            self._networkListen(relay_url))
 
     async def _networkDiscover(self, ConfigClass):
         """On-demand discovery: connect to all relays, find all streams.
@@ -307,14 +339,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
 
         # 2. Find inactive subscriptions
-        inactive = []
-        for sub in desired:
-            cadence = sub.get('cadence_seconds')
-            is_stale = await asyncio.to_thread(
-                self.networkDB.is_locally_stale,
-                sub['stream_name'], sub['provider_pubkey'], cadence)
-            if is_stale:
-                inactive.append(sub)
+        #    On first run, treat all as inactive to establish connections
+        if self._networkFirstRun:
+            inactive = list(desired)
+            self._networkFirstRun = False
+        else:
+            inactive = []
+            for sub in desired:
+                cadence = sub.get('cadence_seconds')
+                is_stale = await asyncio.to_thread(
+                    self.networkDB.is_locally_stale,
+                    sub['stream_name'], sub['provider_pubkey'], cadence)
+                if is_stale:
+                    inactive.append(sub)
 
         if not inactive:
             return
@@ -386,8 +423,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     logging.warning(
                         f'Network: subscribe failed {stream_name}: {e}')
 
-            # Disconnect if this relay had nothing we needed
-            if not found_any:
+            if found_any:
+                # Start listening for observations on this relay
+                self._networkEnsureListener(relay_url)
+            else:
+                # Disconnect if this relay had nothing we needed
                 await self._networkDisconnect(relay_url)
 
         # 5. Whatever's left in hunting wasn't found anywhere — mark stale
