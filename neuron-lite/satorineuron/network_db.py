@@ -47,6 +47,8 @@ class NetworkDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_name TEXT NOT NULL,
                 provider_pubkey TEXT NOT NULL,
+                seq_num INTEGER,
+                observed_at INTEGER,
                 received_at INTEGER NOT NULL,
                 value TEXT,
                 event_id TEXT
@@ -68,6 +70,8 @@ class NetworkDB:
             CREATE TABLE IF NOT EXISTS publications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_name TEXT NOT NULL UNIQUE,
+                source_stream_name TEXT,
+                source_provider_pubkey TEXT,
                 name TEXT,
                 description TEXT,
                 cadence_seconds INTEGER,
@@ -79,6 +83,22 @@ class NetworkDB:
                 last_published_at INTEGER,
                 last_seq_num INTEGER NOT NULL DEFAULT 0
             )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name TEXT NOT NULL,
+                provider_pubkey TEXT NOT NULL,
+                observation_seq INTEGER,
+                value TEXT NOT NULL,
+                observed_at INTEGER,
+                created_at INTEGER NOT NULL,
+                published INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pred_stream
+            ON predictions(stream_name, provider_pubkey, created_at DESC)
         """)
         # Migration: add stale_since if missing (existing DBs)
         try:
@@ -103,6 +123,25 @@ class NetworkDB:
             conn.execute(
                 "ALTER TABLE publications "
                 "ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0")
+        # Migration: add source fields to publications
+        try:
+            conn.execute(
+                "SELECT source_stream_name FROM publications LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN source_stream_name TEXT")
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN source_provider_pubkey TEXT")
+        # Migration: add seq_num, observed_at to observations
+        try:
+            conn.execute("SELECT seq_num FROM observations LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE observations ADD COLUMN seq_num INTEGER")
+            conn.execute(
+                "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -143,6 +182,14 @@ class NetworkDB:
         ))
         conn.commit()
         self.upsert_relay(relay_url)
+        # Auto-create prediction publication for this stream
+        pred_name = stream['stream_name'] + '_pred'
+        self.add_publication(
+            stream_name=pred_name,
+            name=f"Predictions for {stream.get('name') or stream['stream_name']}",
+            cadence_seconds=stream.get('cadence_seconds'),
+            source_stream_name=stream['stream_name'],
+            source_provider_pubkey=stream['nostr_pubkey'])
         return conn.execute(
             "SELECT id FROM subscriptions WHERE stream_name=? AND provider_pubkey=?",
             (stream['stream_name'], stream['nostr_pubkey'])
@@ -221,14 +268,17 @@ class NetworkDB:
     # ── Observations ───────────────────────────────────────────────
 
     def save_observation(self, stream_name: str, provider_pubkey: str,
-                         value: str = None, event_id: str = None):
+                         value: str = None, event_id: str = None,
+                         seq_num: int = None, observed_at: int = None):
         """Record a received observation."""
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO observations
-                (stream_name, provider_pubkey, received_at, value, event_id)
-            VALUES (?, ?, ?, ?, ?)
-        """, (stream_name, provider_pubkey, int(time.time()), value, event_id))
+                (stream_name, provider_pubkey, seq_num, observed_at,
+                 received_at, value, event_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (stream_name, provider_pubkey, seq_num, observed_at,
+              int(time.time()), value, event_id))
         conn.commit()
 
     def last_observation_time(self, stream_name: str,
@@ -293,17 +343,21 @@ class NetworkDB:
                         cadence_seconds: int = None,
                         price_per_obs: int = 0,
                         encrypted: bool = False,
-                        tags: list[str] = None) -> int:
+                        tags: list[str] = None,
+                        source_stream_name: str = None,
+                        source_provider_pubkey: str = None) -> int:
         """Register a stream we intend to publish. Returns row id."""
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO publications
-                (stream_name, name, description,
-                 cadence_seconds, price_per_obs, encrypted,
-                 tags, active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                (stream_name, source_stream_name, source_provider_pubkey,
+                 name, description, cadence_seconds, price_per_obs,
+                 encrypted, tags, active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(stream_name) DO UPDATE SET
                 active = 1,
+                source_stream_name = excluded.source_stream_name,
+                source_provider_pubkey = excluded.source_provider_pubkey,
                 name = excluded.name,
                 description = excluded.description,
                 cadence_seconds = excluded.cadence_seconds,
@@ -311,7 +365,8 @@ class NetworkDB:
                 encrypted = excluded.encrypted,
                 tags = excluded.tags
         """, (
-            stream_name, name, description,
+            stream_name, source_stream_name, source_provider_pubkey,
+            name, description,
             cadence_seconds, price_per_obs,
             1 if encrypted else 0,
             ','.join(tags or []),
@@ -351,3 +406,59 @@ class NetworkDB:
             "SELECT last_seq_num FROM publications WHERE stream_name = ?",
             (stream_name,)).fetchone()
         return row['last_seq_num'] if row else 0
+
+    # ── Predictions ──────────────────────────────────────────────
+
+    def save_prediction(self, stream_name: str, provider_pubkey: str,
+                        value: str, observation_seq: int = None,
+                        observed_at: int = None) -> int:
+        """Save a prediction. Returns row id."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO predictions
+                (stream_name, provider_pubkey, observation_seq,
+                 value, observed_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            stream_name, provider_pubkey, observation_seq,
+            value, observed_at, int(time.time()),
+        ))
+        conn.commit()
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    def get_predictions(self, stream_name: str,
+                        provider_pubkey: str = None,
+                        limit: int = 100) -> list[dict]:
+        """Return recent predictions for a stream."""
+        conn = self._get_conn()
+        if provider_pubkey:
+            rows = conn.execute("""
+                SELECT * FROM predictions
+                WHERE stream_name = ? AND provider_pubkey = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (stream_name, provider_pubkey, limit)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT * FROM predictions
+                WHERE stream_name = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (stream_name, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_unpublished_predictions(self) -> list[dict]:
+        """Return predictions not yet published."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM predictions
+            WHERE published = 0
+            ORDER BY created_at ASC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_prediction_published(self, prediction_id: int):
+        """Mark a prediction as published."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE predictions SET published = 1 WHERE id = ?",
+            (prediction_id,))
+        conn.commit()

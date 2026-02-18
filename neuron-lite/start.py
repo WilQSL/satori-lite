@@ -237,23 +237,66 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return None, False
 
     async def _networkListen(self, relay_url: str):
-        """Listen for observations on a relay and save them to the DB."""
+        """Listen for observations on a relay and save them to the DB.
+
+        After saving each observation, runs the mock engine to produce
+        a prediction (echoes the value) and saves it to the predictions table.
+        """
         client = self._networkClients.get(relay_url)
         if not client:
             return
         try:
             async for obs in client.observations():
+                obs_json = (obs.observation.to_json()
+                            if obs.observation else None)
                 await asyncio.to_thread(
                     self.networkDB.save_observation,
                     obs.stream_name,
                     obs.nostr_pubkey,
-                    obs.observation.to_json() if obs.observation else None,
-                    obs.event_id)
+                    obs_json,
+                    obs.event_id,
+                    obs.observation.seq_num if obs.observation else None,
+                    obs.observation.timestamp if obs.observation else None)
+                # Mock engine: echo observation value as prediction
+                if obs.observation:
+                    await self._networkRunEngine(
+                        obs.stream_name,
+                        obs.nostr_pubkey,
+                        obs.observation)
         except asyncio.CancelledError:
             return
         except Exception as e:
             logging.warning(
                 f'Network: listener stopped on {relay_url}: {e}')
+
+    async def _networkRunEngine(self, stream_name: str, provider_pubkey: str,
+                                observation):
+        """Mock engine: echo the observation value as a prediction.
+
+        Saves to predictions table, then publishes to the network
+        on the corresponding _pred publication stream.
+        """
+        import json
+        value = observation.value
+        value_str = json.dumps(value) if not isinstance(value, str) else value
+        try:
+            pred_id = await asyncio.to_thread(
+                self.networkDB.save_prediction,
+                stream_name,
+                provider_pubkey,
+                value=value_str,
+                observation_seq=observation.seq_num,
+                observed_at=observation.timestamp)
+            logging.info(
+                f'Network: prediction #{pred_id} for {stream_name} '
+                f'(echo)', color='cyan')
+            # Publish prediction to all connected relays
+            pred_stream = stream_name + '_pred'
+            await self._networkPublishObservation(pred_stream, value)
+            await asyncio.to_thread(
+                self.networkDB.mark_prediction_published, pred_id)
+        except Exception as e:
+            logging.warning(f'Network: prediction failed: {e}')
 
     def _networkEnsureListener(self, relay_url: str):
         """Start an observation listener for a relay if one isn't running."""
@@ -275,6 +318,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         for pub in pubs:
             try:
+                source = {}
+                if pub.get('source_stream_name'):
+                    source['source_stream_name'] = pub['source_stream_name']
+                    source['source_provider_pubkey'] = pub.get(
+                        'source_provider_pubkey', '')
                 metadata = DatastreamMetadata(
                     stream_name=pub['stream_name'],
                     nostr_pubkey=self.nostrPubkey,
@@ -285,6 +333,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     created_at=pub['created_at'],
                     cadence_seconds=pub.get('cadence_seconds'),
                     tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
+                    metadata=source or None,
                 )
                 await client.announce_datastream(metadata)
                 logging.info(
@@ -313,6 +362,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             timestamp=int(time.time()),
             value=value,
             seq_num=seq_num)
+        source = {}
+        if pub.get('source_stream_name'):
+            source['source_stream_name'] = pub['source_stream_name']
+            source['source_provider_pubkey'] = pub.get(
+                'source_provider_pubkey', '')
         metadata = DatastreamMetadata(
             stream_name=stream_name,
             nostr_pubkey=self.nostrPubkey,
@@ -322,7 +376,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             price_per_obs=pub.get('price_per_obs', 0),
             created_at=pub['created_at'],
             cadence_seconds=pub.get('cadence_seconds'),
-            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [])
+            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
+            metadata=source or None)
         for relay_url, client in list(self._networkClients.items()):
             try:
                 await client.publish_observation(observation, metadata)
