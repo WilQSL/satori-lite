@@ -42,6 +42,50 @@
     .mono {
         font-family: Consolas, "Courier New", monospace;
     }
+    .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 8, 12, 0.78);
+        backdrop-filter: blur(3px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+    }
+    .loading-card {
+        width: min(92vw, 460px);
+        background: linear-gradient(180deg, rgba(20, 20, 20, 0.96), rgba(12, 12, 14, 0.96));
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 1.2rem 1.3rem;
+        box-shadow: var(--shadow);
+    }
+    .loading-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 0.6rem;
+        color: var(--text-primary);
+    }
+    .loading-progress {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+    }
+    .loading-progress-bar {
+        height: 100%;
+        width: 0%;
+        background: var(--accent-gradient);
+        transition: width 0.25s ease;
+    }
+    .loading-meta {
+        margin-top: 0.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+    }
 </style>
 {% endblock %}
 
@@ -201,6 +245,19 @@
     </div>
 </div>
 
+<div id="loadingOverlay" class="loading-overlay" aria-hidden="true">
+    <div class="loading-card">
+        <div class="loading-title" id="loadingTitle">Loading local predictions...</div>
+        <div class="loading-progress">
+            <div id="loadingProgressBar" class="loading-progress-bar"></div>
+        </div>
+        <div class="loading-meta">
+            <span id="loadingStep">Preparing data...</span>
+            <strong id="loadingPercent">0%</strong>
+        </div>
+    </div>
+</div>
+
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
     <div id="statusToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
         <div class="toast-header">
@@ -218,6 +275,7 @@ let predictionsChart = null;
 let errorChart = null;
 let currentStream = '';
 let allStreams = [];
+let loadingHideTimer = null;
 
 function showToast(message, isError = false) {
     const toast = document.getElementById('statusToast');
@@ -226,6 +284,45 @@ function showToast(message, isError = false) {
     toastBody.className = 'toast-body ' + (isError ? 'text-danger' : 'text-success');
     const bsToast = new bootstrap.Toast(toast);
     bsToast.show();
+}
+
+function showLoading(message = 'Loading local predictions...', step = 'Preparing data...', percent = 0) {
+    const overlay = document.getElementById('loadingOverlay');
+    const title = document.getElementById('loadingTitle');
+    const stepEl = document.getElementById('loadingStep');
+    const percentEl = document.getElementById('loadingPercent');
+    const bar = document.getElementById('loadingProgressBar');
+
+    if (loadingHideTimer) {
+        clearTimeout(loadingHideTimer);
+        loadingHideTimer = null;
+    }
+
+    overlay.style.display = 'flex';
+    overlay.setAttribute('aria-hidden', 'false');
+    title.textContent = message;
+    stepEl.textContent = step;
+    percentEl.textContent = `${Math.max(0, Math.min(100, percent))}%`;
+    bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+}
+
+function updateLoading(step, percent) {
+    const stepEl = document.getElementById('loadingStep');
+    const percentEl = document.getElementById('loadingPercent');
+    const bar = document.getElementById('loadingProgressBar');
+    stepEl.textContent = step;
+    percentEl.textContent = `${Math.max(0, Math.min(100, percent))}%`;
+    bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+}
+
+function hideLoading() {
+    updateLoading('Done', 100);
+    loadingHideTimer = setTimeout(() => {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.style.display = 'none';
+        overlay.setAttribute('aria-hidden', 'true');
+        loadingHideTimer = null;
+    }, 220);
 }
 
 function sliderToSeconds(sliderValue) {
@@ -375,9 +472,11 @@ async function loadStreams() {
     const select = document.getElementById('streamSelect');
     select.disabled = true;
     setStatus('Loading streams...', 'secondary');
+    showLoading('Loading local predictions...', 'Fetching stream list...', 15);
 
     try {
         const data = await fetchJson('/api/engine/streams');
+        updateLoading('Stream list ready', 45);
         const streams = data.streams || [];
         allStreams = streams;
         document.getElementById('activeStreamsCount').textContent = data.active_model_count || 0;
@@ -390,6 +489,7 @@ async function loadStreams() {
             renderRows([], []);
             updateStreamMeta(null);
             setStatus('No local streams available yet.', 'warning');
+            hideLoading();
             return;
         }
 
@@ -408,10 +508,12 @@ async function loadStreams() {
         }
 
         updateStreamMeta(streams.find((s) => s.stream_uuid === select.value));
+        updateLoading('Loading selected stream performance...', 62);
         await loadPerformance();
     } catch (error) {
         setStatus(`Failed to load streams: ${error.message}`, 'danger');
         select.innerHTML = '<option value="">Stream load failed</option>';
+        hideLoading();
     } finally {
         select.disabled = false;
     }
@@ -534,9 +636,11 @@ async function loadPerformance() {
 
     currentStream = streamUuid;
     setStatus('Loading predictions for selected stream...', 'secondary');
+    showLoading('Loading local predictions...', 'Fetching predictions and observations...', 70);
 
     try {
         const data = await fetchJson(`/api/engine/performance?stream_uuid=${encodeURIComponent(streamUuid)}&limit=500`);
+        updateLoading('Processing and rendering charts...', 88);
         const observations = data.observations || [];
         const predictions = data.predictions || [];
         const accuracy = data.accuracy || [];
@@ -553,8 +657,10 @@ async function loadPerformance() {
             `Loaded ${predictions.length} predictions and ${observations.length} observations for ${getStreamDisplayName(stream)} (${shortUuid(streamUuid)}).`,
             'success'
         );
+        hideLoading();
     } catch (error) {
         setStatus(`Failed to load performance data: ${error.message}`, 'danger');
+        hideLoading();
     }
 }
 
