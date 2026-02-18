@@ -22,5 +22,6 @@ logging.setup(
     stdoutAndFile=False
 )
 
+<<<<<<< HEAD
 VERSION = 'v2.0.0'
 MOTTO = 'Let your workings remain a mystery, just show people the results.'
