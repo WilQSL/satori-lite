@@ -263,6 +263,92 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkListeners[relay_url] = asyncio.ensure_future(
             self._networkListen(relay_url))
 
+    async def _networkAnnouncePublications(self, relay_url: str):
+        """Announce all our published streams to a relay."""
+        from satorilib.satori_nostr.models import DatastreamMetadata
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        pubs = await asyncio.to_thread(
+            self.networkDB.get_active_publications)
+        if not pubs:
+            return
+        for pub in pubs:
+            try:
+                metadata = DatastreamMetadata(
+                    stream_name=pub['stream_name'],
+                    nostr_pubkey=self.nostrPubkey,
+                    name=pub.get('name', ''),
+                    description=pub.get('description', ''),
+                    encrypted=bool(pub.get('encrypted', 0)),
+                    price_per_obs=pub.get('price_per_obs', 0),
+                    created_at=pub['created_at'],
+                    cadence_seconds=pub.get('cadence_seconds'),
+                    tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
+                )
+                await client.announce_datastream(metadata)
+                logging.info(
+                    f'Network: announced {pub["stream_name"]} on '
+                    f'{relay_url}', color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: announce failed {pub["stream_name"]}: {e}')
+
+    async def _networkPublishObservation(self, stream_name: str, value):
+        """Publish an observation to all connected relays."""
+        from satorilib.satori_nostr.models import (
+            DatastreamObservation, DatastreamMetadata)
+        pub = await asyncio.to_thread(
+            lambda: next(
+                (p for p in self.networkDB.get_active_publications()
+                 if p['stream_name'] == stream_name), None))
+        if not pub:
+            logging.warning(
+                f'Network: cannot publish {stream_name}: not registered')
+            return
+        seq_num = await asyncio.to_thread(
+            self.networkDB.mark_published, stream_name)
+        observation = DatastreamObservation(
+            stream_name=stream_name,
+            timestamp=int(time.time()),
+            value=value,
+            seq_num=seq_num)
+        metadata = DatastreamMetadata(
+            stream_name=stream_name,
+            nostr_pubkey=self.nostrPubkey,
+            name=pub.get('name', ''),
+            description=pub.get('description', ''),
+            encrypted=bool(pub.get('encrypted', 0)),
+            price_per_obs=pub.get('price_per_obs', 0),
+            created_at=pub['created_at'],
+            cadence_seconds=pub.get('cadence_seconds'),
+            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [])
+        for relay_url, client in list(self._networkClients.items()):
+            try:
+                await client.publish_observation(observation, metadata)
+                logging.info(
+                    f'Network: published {stream_name} seq={seq_num} '
+                    f'to {relay_url}', color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: publish failed on {relay_url}: {e}')
+
+    def publishObservation(self, stream_name: str, value):
+        """Publish an observation from a sync context (e.g. Flask route, engine).
+
+        Broadcasts to all connected relays. Non-blocking.
+        """
+        if not hasattr(self, '_networkSecretHex'):
+            return
+        loop = asyncio.new_event_loop()
+        def run():
+            try:
+                loop.run_until_complete(
+                    self._networkPublishObservation(stream_name, value))
+            finally:
+                loop.close()
+        threading.Thread(target=run, daemon=True).start()
+
     async def _networkDiscover(self, ConfigClass):
         """On-demand discovery: connect to all relays, find all streams.
 
@@ -464,6 +550,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if found_any:
                 # Start listening for observations on this relay
                 self._networkEnsureListener(relay_url)
+                # Announce our publications to this relay
+                await self._networkAnnouncePublications(relay_url)
             else:
                 # Disconnect if this relay had nothing we needed
                 await self._networkDisconnect(relay_url)

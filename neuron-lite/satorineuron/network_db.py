@@ -64,12 +64,45 @@ class NetworkDB:
                 last_active INTEGER NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS publications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name TEXT NOT NULL UNIQUE,
+                name TEXT,
+                description TEXT,
+                cadence_seconds INTEGER,
+                price_per_obs INTEGER NOT NULL DEFAULT 0,
+                encrypted INTEGER NOT NULL DEFAULT 0,
+                tags TEXT,
+                active INTEGER DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                last_published_at INTEGER,
+                last_seq_num INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         # Migration: add stale_since if missing (existing DBs)
         try:
             conn.execute("SELECT stale_since FROM subscriptions LIMIT 1")
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN stale_since INTEGER")
+        # Migration: add last_seq_num if missing (existing DBs)
+        try:
+            conn.execute("SELECT last_seq_num FROM publications LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN last_seq_num INTEGER NOT NULL DEFAULT 0")
+        # Migration: add price_per_obs, encrypted to publications
+        try:
+            conn.execute("SELECT price_per_obs FROM publications LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN price_per_obs INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -252,3 +285,69 @@ class NetworkDB:
         conn = self._get_conn()
         conn.execute("DELETE FROM relays WHERE relay_url = ?", (relay_url,))
         conn.commit()
+
+    # ── Publications ──────────────────────────────────────────────
+
+    def add_publication(self, stream_name: str, name: str = '',
+                        description: str = '',
+                        cadence_seconds: int = None,
+                        price_per_obs: int = 0,
+                        encrypted: bool = False,
+                        tags: list[str] = None) -> int:
+        """Register a stream we intend to publish. Returns row id."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO publications
+                (stream_name, name, description,
+                 cadence_seconds, price_per_obs, encrypted,
+                 tags, active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+            ON CONFLICT(stream_name) DO UPDATE SET
+                active = 1,
+                name = excluded.name,
+                description = excluded.description,
+                cadence_seconds = excluded.cadence_seconds,
+                price_per_obs = excluded.price_per_obs,
+                encrypted = excluded.encrypted,
+                tags = excluded.tags
+        """, (
+            stream_name, name, description,
+            cadence_seconds, price_per_obs,
+            1 if encrypted else 0,
+            ','.join(tags or []),
+            int(time.time()),
+        ))
+        conn.commit()
+        return conn.execute(
+            "SELECT id FROM publications WHERE stream_name=?",
+            (stream_name,)
+        ).fetchone()[0]
+
+    def remove_publication(self, stream_name: str):
+        """Soft-delete a publication."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE publications SET active = 0 WHERE stream_name = ?",
+            (stream_name,))
+        conn.commit()
+
+    def get_active_publications(self) -> list[dict]:
+        """Return all active publications."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM publications WHERE active = 1 ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_published(self, stream_name: str) -> int:
+        """Bump seq_num and update last_published_at. Returns new seq_num."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE publications SET last_published_at = ?, "
+            "last_seq_num = last_seq_num + 1 WHERE stream_name = ?",
+            (int(time.time()), stream_name))
+        conn.commit()
+        row = conn.execute(
+            "SELECT last_seq_num FROM publications WHERE stream_name = ?",
+            (stream_name,)).fetchone()
+        return row['last_seq_num'] if row else 0
