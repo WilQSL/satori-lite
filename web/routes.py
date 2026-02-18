@@ -23,7 +23,8 @@ from flask import (
     session,
     flash,
     jsonify,
-    current_app
+    current_app,
+    send_file
 )
 
 logger = logging.getLogger(__name__)
@@ -1774,4 +1775,48 @@ def register_routes(app):
             logger.error(f"Wallet import error: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/download', methods=['GET'])
+    @login_required
+    def api_wallet_download():
+        """Download wallet folder as ZIP compatible with wallet import."""
+        import io
+        import zipfile
+        import datetime
+        from pathlib import Path
+        from satorineuron import config
+
+        try:
+            wallet_dir = Path(config.walletPath())
+            if not wallet_dir.exists():
+                return jsonify({'error': 'Wallet directory not found'}), 404
+
+            allowed_files = ['wallet.yaml', 'vault.yaml', 'wallet.yaml.bak', 'vault.yaml.bak']
+            required_files = ['wallet.yaml', 'vault.yaml']
+
+            missing_required = [name for name in required_files if not (wallet_dir / name).exists()]
+            if missing_required:
+                return jsonify({
+                    'error': f'Missing required wallet files: {", ".join(missing_required)}'
+                }), 404
+
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                for file_name in allowed_files:
+                    src = wallet_dir / file_name
+                    if src.exists() and src.is_file():
+                        # Keep top-level "wallet" folder so extracted content is import-compatible.
+                        zipf.write(src, arcname=f'wallet/{file_name}')
+
+            archive.seek(0)
+            timestamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            return send_file(
+                archive,
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name=f'wallet_backup_{timestamp}.zip'
+            )
+        except Exception as e:
+            logger.error(f"Wallet download error: {e}")
             return jsonify({'error': str(e)}), 500
