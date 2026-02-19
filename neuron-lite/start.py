@@ -436,6 +436,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         for src in sources:
             stream_name = src['stream_name']
             cadence = src['cadence_seconds']
+            # Skip externally-fed sources (no URL or no cadence)
+            if not src.get('url') or not cadence:
+                continue
             pub = pub_map.get(stream_name)
             if not pub:
                 continue

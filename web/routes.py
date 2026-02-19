@@ -1850,18 +1850,22 @@ def register_routes(app):
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
         data = request.get_json()
-        required = ['stream_name', 'url', 'cadence_seconds',
-                    'parser_type', 'parser_config']
-        for field in required:
-            if not data.get(field):
-                return jsonify({'error': f'Missing {field}'}), 400
+        if not data or not data.get('stream_name'):
+            return jsonify({'error': 'Missing stream_name'}), 400
+        url = data.get('url', '').strip()
+        cadence = data.get('cadence_seconds') or 0
+        parser_type = data.get('parser_type', '') if url else ''
+        parser_config = data.get('parser_config', '') if url else ''
+        # If URL is provided, parser config is required
+        if url and not parser_config:
+            return jsonify({'error': 'Parser config required when URL is set'}), 400
         # Create the data source
         startup.networkDB.add_data_source(
             stream_name=data['stream_name'],
-            url=data['url'],
-            cadence_seconds=data['cadence_seconds'],
-            parser_type=data['parser_type'],
-            parser_config=data['parser_config'],
+            url=url,
+            cadence_seconds=cadence,
+            parser_type=parser_type,
+            parser_config=parser_config,
             name=data.get('name', ''),
             description=data.get('description', ''),
             method=data.get('method', 'GET'),
@@ -1871,8 +1875,37 @@ def register_routes(app):
             stream_name=data['stream_name'],
             name=data.get('name', ''),
             description=data.get('description', ''),
-            cadence_seconds=data['cadence_seconds'])
+            cadence_seconds=cadence or None)
         return jsonify({'success': True})
+
+    @app.route('/api/network/publish', methods=['POST'])
+    @login_required
+    def api_network_publish():
+        """Push a value to an existing publication.
+
+        For externally-fed streams where the neuron doesn't fetch data itself.
+        The caller provides the stream_name and value, and the neuron publishes
+        it to all connected relays.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'value' not in data:
+            return jsonify({'error': 'Missing stream_name or value'}), 400
+        stream_name = data['stream_name']
+        value = data['value']
+        # Verify publication exists
+        pubs = startup.networkDB.get_active_publications()
+        pub = next((p for p in pubs if p['stream_name'] == stream_name), None)
+        if not pub:
+            return jsonify({'error': f'No active publication: {stream_name}'}), 404
+        try:
+            startup.publishObservation(stream_name, value)
+            return jsonify({'success': True, 'stream_name': stream_name})
+        except Exception as e:
+            logger.error(f"Publish error: {e}")
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/network/relays', methods=['GET'])
     @login_required

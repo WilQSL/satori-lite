@@ -325,7 +325,7 @@ class NetworkDB:
             return True  # never received — stale
         elapsed = int(time.time()) - last
         if cadence_seconds is None or cadence_seconds <= 0:
-            return elapsed > 86400  # irregular: stale after 24h
+            return False  # no cadence = always considered live
         return elapsed > (cadence_seconds * multiplier)
 
     # ── Relays ────────────────────────────────────────────────────
@@ -503,9 +503,9 @@ class NetworkDB:
 
     # ── Data Sources ─────────────────────────────────────────────
 
-    def add_data_source(self, stream_name: str, url: str,
-                        cadence_seconds: int, parser_type: str,
-                        parser_config: str, name: str = '',
+    def add_data_source(self, stream_name: str, url: str = '',
+                        cadence_seconds: int = 0, parser_type: str = '',
+                        parser_config: str = '', name: str = '',
                         description: str = '', method: str = 'GET',
                         headers: str = None) -> int:
         """Register an external data source. Returns row id."""

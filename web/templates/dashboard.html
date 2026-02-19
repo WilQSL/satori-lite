@@ -486,24 +486,25 @@
                         </div>
                         <div class="row g-2 mb-2">
                             <div class="col-md-6">
-                                <label class="form-label form-label-sm">URL</label>
-                                <input type="text" id="dsUrl" class="form-control form-control-sm" placeholder="https://api.example.com/price">
+                                <label class="form-label form-label-sm">URL <small class="text-muted">(leave empty for external push)</small></label>
+                                <input type="text" id="dsUrl" class="form-control form-control-sm" placeholder="https://api.example.com/price" oninput="toggleFetchFields()">
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-2" id="dsMethodGroup">
                                 <label class="form-label form-label-sm">Method</label>
                                 <select id="dsMethod" class="form-select form-select-sm">
                                     <option value="GET">GET</option>
                                     <option value="POST">POST</option>
                                 </select>
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label form-label-sm">Cadence</label>
+                            <div class="col-md-3" id="dsCadenceGroup">
+                                <label class="form-label form-label-sm">Cadence <small class="text-muted">(optional)</small></label>
                                 <div class="input-group input-group-sm">
-                                    <input type="number" id="dsCadenceMin" class="form-control form-control-sm" value="60" min="10">
+                                    <input type="number" id="dsCadenceMin" class="form-control form-control-sm" value="" min="15" placeholder="—">
                                     <span class="input-group-text">min</span>
                                     <select id="dsCadencePreset" class="form-select form-select-sm" onchange="applyCadencePreset()">
                                         <option value="">Presets</option>
-                                        <option value="10">10 min</option>
+                                        <option value="15">15 min</option>
+                                        <option value="30">30 min</option>
                                         <option value="60">1 hour</option>
                                         <option value="240">4 hours</option>
                                         <option value="1440">1 day</option>
@@ -513,12 +514,12 @@
                                     </select>
                                 </div>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-2" id="dsHeadersGroup">
                                 <label class="form-label form-label-sm">Headers (JSON)</label>
                                 <input type="text" id="dsHeaders" class="form-control form-control-sm" placeholder='{"Authorization": "..."}'>
                             </div>
                         </div>
-                        <div class="row g-2 mb-2">
+                        <div class="row g-2 mb-2" id="dsParserRow">
                             <div class="col-md-3">
                                 <label class="form-label form-label-sm">Parser Type</label>
                                 <select id="dsParserType" class="form-select form-select-sm" onchange="toggleParserInput()">
@@ -534,6 +535,12 @@
                                 <label class="form-label form-label-sm">Python Function <small class="text-muted">(receives <code>text</code>, return the value)</small></label>
                                 <textarea id="dsParserPython" class="form-control form-control-sm font-monospace" rows="4" placeholder="import json&#10;data = json.loads(text)&#10;return data['price']"></textarea>
                             </div>
+                        </div>
+                        <div id="dsExternalHint" style="display: none;" class="mb-2">
+                            <small class="text-muted">
+                                No URL — this stream accepts data via <code>POST /api/network/publish</code>
+                                with <code>{"stream_name": "...", "value": "..."}</code>
+                            </small>
                         </div>
                         <div class="d-flex gap-2 mb-2">
                             <button class="btn btn-sm btn-outline-info" onclick="testDataSource(this)">Test</button>
@@ -1958,10 +1965,7 @@
         const lines = text.trim().split('\n');
         if (lines.length < 2) { alert('CSV must have a header and at least one row'); return; }
         const headerRow = lines[0].split(',').map(h => h.trim().toLowerCase());
-        const required = ['stream_name', 'url', 'cadence_minutes', 'parser_type', 'parser_config'];
-        for (const r of required) {
-            if (!headerRow.includes(r)) { alert('Missing required column: ' + r); return; }
-        }
+        if (!headerRow.includes('stream_name')) { alert('Missing required column: stream_name'); return; }
         let created = 0, errors = [];
         for (let i = 1; i < lines.length; i++) {
             if (!lines[i].trim()) continue;
@@ -1973,9 +1977,18 @@
                 if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
                 row[h] = v;
             });
-            const cadenceMin = parseInt(row.cadence_minutes);
-            if (!row.stream_name || !row.url || !cadenceMin || cadenceMin < 10 || !row.parser_config) {
-                errors.push('Row ' + (i+1) + ': missing or invalid fields');
+            if (!row.stream_name) {
+                errors.push('Row ' + (i+1) + ': missing stream_name');
+                continue;
+            }
+            const cadenceMin = parseInt(row.cadence_minutes) || 0;
+            const hasUrl = !!row.url;
+            if (hasUrl && cadenceMin && cadenceMin < 15) {
+                errors.push('Row ' + (i+1) + ': cadence must be at least 15 minutes');
+                continue;
+            }
+            if (hasUrl && !row.parser_config) {
+                errors.push('Row ' + (i+1) + ': parser_config required when URL is set');
                 continue;
             }
             try {
@@ -1986,12 +1999,12 @@
                         stream_name: row.stream_name,
                         name: row.name || '',
                         description: row.description || '',
-                        url: row.url,
+                        url: row.url || '',
                         method: row.method || 'GET',
                         headers: row.headers || null,
-                        cadence_seconds: cadenceMin * 60,
-                        parser_type: row.parser_type || 'json_path',
-                        parser_config: row.parser_config,
+                        cadence_seconds: cadenceMin ? cadenceMin * 60 : 0,
+                        parser_type: hasUrl ? (row.parser_type || 'json_path') : '',
+                        parser_config: hasUrl ? (row.parser_config || '') : '',
                     })
                 });
                 const data = await resp.json();
@@ -2026,10 +2039,11 @@
         document.getElementById('dsStreamName').readOnly = false;
         ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython'].forEach(
             id => document.getElementById(id).value = '');
-        document.getElementById('dsCadenceMin').value = '60';
+        document.getElementById('dsCadenceMin').value = '';
         document.getElementById('dsMethod').value = 'GET';
         document.getElementById('dsParserType').value = 'json_path';
         toggleParserInput();
+        toggleFetchFields();
         document.getElementById('dsTestResults').style.display = 'none';
     }
 
@@ -2048,7 +2062,7 @@
             document.getElementById('dsUrl').value = ds.url || '';
             document.getElementById('dsMethod').value = ds.method || 'GET';
             document.getElementById('dsHeaders').value = ds.headers || '';
-            document.getElementById('dsCadenceMin').value = Math.round((ds.cadence_seconds || 600) / 60);
+            document.getElementById('dsCadenceMin').value = ds.cadence_seconds ? Math.round(ds.cadence_seconds / 60) : '';
             document.getElementById('dsParserType').value = ds.parser_type || 'json_path';
             toggleParserInput();
             if (ds.parser_type === 'python') {
@@ -2056,6 +2070,7 @@
             } else {
                 document.getElementById('dsParserJsonPath').value = ds.parser_config || '';
             }
+            toggleFetchFields();
             document.getElementById('dsTestResults').style.display = 'none';
             document.getElementById('dsError').textContent = '';
             // Show form and scroll to it
@@ -2077,6 +2092,15 @@
         const type = document.getElementById('dsParserType').value;
         document.getElementById('dsParserJsonPathGroup').style.display = type === 'json_path' ? '' : 'none';
         document.getElementById('dsParserPythonGroup').style.display = type === 'python' ? '' : 'none';
+    }
+
+    function toggleFetchFields() {
+        const hasUrl = document.getElementById('dsUrl').value.trim() !== '';
+        document.getElementById('dsMethodGroup').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsCadenceGroup').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsHeadersGroup').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsParserRow').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsExternalHint').style.display = hasUrl ? 'none' : '';
     }
 
     function renderJsonTree(obj, path, container) {
@@ -2214,19 +2238,24 @@
         err.textContent = '';
         const streamName = document.getElementById('dsStreamName').value.trim();
         const url = document.getElementById('dsUrl').value.trim();
-        const cadenceMin = parseInt(document.getElementById('dsCadenceMin').value);
-        const parserType = document.getElementById('dsParserType').value;
-        const parserConfig = parserType === 'json_path'
-            ? document.getElementById('dsParserJsonPath').value.trim()
-            : document.getElementById('dsParserPython').value.trim();
         if (!streamName) { err.textContent = 'Stream name required'; return; }
-        if (!url) { err.textContent = 'URL required'; return; }
-        if (!cadenceMin || cadenceMin < 10) { err.textContent = 'Cadence must be at least 10 minutes'; return; }
-        const cadence = cadenceMin * 60;
-        if (!parserConfig) { err.textContent = 'Parser config required'; return; }
+        // URL-dependent validation
+        let cadence = 0;
+        let parserType = '';
+        let parserConfig = '';
         const headers = document.getElementById('dsHeaders').value.trim() || null;
-        if (headers) {
-            try { JSON.parse(headers); } catch(e) { err.textContent = 'Headers must be valid JSON'; return; }
+        if (url) {
+            const cadenceMin = parseInt(document.getElementById('dsCadenceMin').value);
+            if (!cadenceMin || cadenceMin < 15) { err.textContent = 'Cadence must be at least 15 minutes'; return; }
+            cadence = cadenceMin * 60;
+            parserType = document.getElementById('dsParserType').value;
+            parserConfig = parserType === 'json_path'
+                ? document.getElementById('dsParserJsonPath').value.trim()
+                : document.getElementById('dsParserPython').value.trim();
+            if (!parserConfig) { err.textContent = 'Parser config required'; return; }
+            if (headers) {
+                try { JSON.parse(headers); } catch(e) { err.textContent = 'Headers must be valid JSON'; return; }
+            }
         }
         btnLoading(btn);
         const resp = await fetch('/api/network/data-source', {
@@ -2237,7 +2266,7 @@
                 name: document.getElementById('dsName').value.trim(),
                 description: document.getElementById('dsDescription').value.trim(),
                 url: url,
-                method: document.getElementById('dsMethod').value,
+                method: url ? document.getElementById('dsMethod').value : 'GET',
                 headers: headers,
                 cadence_seconds: cadence,
                 parser_type: parserType,
