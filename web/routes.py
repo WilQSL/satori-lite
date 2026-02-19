@@ -7,6 +7,7 @@ Handles all web routes for the minimal UI:
 - API proxy endpoints
 """
 from functools import wraps
+import os
 import time
 import logging
 import base64
@@ -15,6 +16,33 @@ import uuid
 from threading import Lock
 from cryptography.fernet import Fernet
 from satorilib.config import get_api_url
+
+MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.io')
+
+
+def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
+    """Call Mundo's request endpoint to get fee data for a partial transaction."""
+    resp = requests.get(
+        f'{MUNDO_URL}/simple_partial/request/{network}',
+        params={'inputCount': inputCount, 'outputCount': outputCount},
+        timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _mundoBroadcastSimplePartial(
+    tx, reportedFeeSats: int, feeSatsReserved: int, network: str,
+) -> str:
+    """Call Mundo's broadcast endpoint with signOnly=true, returns signed tx hex."""
+    txData = tx if isinstance(tx, str) else tx.hex()
+    resp = requests.post(
+        f'{MUNDO_URL}/simple_partial/broadcast/{network}/{feeSatsReserved}/{reportedFeeSats}/0',
+        params={'signOnly': 'true'},
+        data=txData,
+        headers={'Content-Type': 'text/plain'},
+        timeout=30)
+    resp.raise_for_status()
+    return resp.text
 from flask import (
     render_template,
     redirect,
@@ -899,21 +927,23 @@ def register_routes(app):
             wallet.get()
             wallet.getReadyToSend()
 
-            if sweep:
-                # Send all tokens - returns string (txid)
-                txid = wallet.sendAllTransaction(address)
-                if txid and len(txid) == 64:
-                    return jsonify({'success': True, 'txid': txid})
-                else:
-                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
-            else:
-                # Send specific amount - use satoriTransaction for wallet (like CLI does)
-                txid = wallet.satoriTransaction(amount=amount, address=address)
+            # typicalNeuronTransaction handles both direct (has EVR) and
+            # indirect (no EVR, uses Mundo) paths, including sweep
+            result = wallet.typicalNeuronTransaction(
+                amount=amount if not sweep else 0,
+                address=address,
+                sweep=sweep,
+                requestSimplePartialFn=_mundoRequestSimplePartial,
+                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
 
-                if txid and len(txid) == 64:
-                    return jsonify({'success': True, 'txid': txid})
+            if hasattr(result, 'success') and hasattr(result, 'msg'):
+                if result.success and result.msg and len(result.msg) == 64:
+                    return jsonify({'success': True, 'txid': result.msg})
                 else:
-                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
+                    error_msg = result.msg or 'Transaction failed'
+                    return jsonify({'error': error_msg}), 500
+            else:
+                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -951,29 +981,23 @@ def register_routes(app):
             vault.get()
             vault.getReadyToSend()
 
-            if sweep:
-                # Send all tokens - returns string (txid)
-                txid = vault.sendAllTransaction(address)
-                if txid and len(txid) == 64:
-                    return jsonify({'success': True, 'txid': txid})
-                else:
-                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
-            else:
-                # Send specific amount - returns TransactionResult object
-                result = vault.typicalNeuronTransaction(
-                    amount=amount,
-                    address=address)
+            # typicalNeuronTransaction handles both direct (has EVR) and
+            # indirect (no EVR, uses Mundo) paths, including sweep
+            result = vault.typicalNeuronTransaction(
+                amount=amount if not sweep else 0,
+                address=address,
+                sweep=sweep,
+                requestSimplePartialFn=_mundoRequestSimplePartial,
+                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
 
-                # Check if result is a TransactionResult object
-                if hasattr(result, 'success') and hasattr(result, 'msg'):
-                    if result.success and result.msg and len(result.msg) == 64:
-                        return jsonify({'success': True, 'txid': result.msg})
-                    else:
-                        error_msg = result.msg or 'Transaction failed'
-                        return jsonify({'error': error_msg}), 500
-                # Fallback for unexpected return type
+            if hasattr(result, 'success') and hasattr(result, 'msg'):
+                if result.success and result.msg and len(result.msg) == 64:
+                    return jsonify({'success': True, 'txid': result.msg})
                 else:
-                    return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
+                    error_msg = result.msg or 'Transaction failed'
+                    return jsonify({'error': error_msg}), 500
+            else:
+                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 

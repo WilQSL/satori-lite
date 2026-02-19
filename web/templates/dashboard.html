@@ -306,6 +306,9 @@
                             <p class="text-muted mb-0">Evrmore (EVR)</p>
                         </div>
                     </div>
+                    <p id="noEvrWarning" class="text-muted small mb-0 mt-1" style="display: none; opacity: 0.7;">
+                        Without EVR in your wallet, larger transaction fees will be paid in SATORI.
+                    </p>
                 </div>
             </div>
         </div>
@@ -1094,6 +1097,12 @@
             if (result && !result.error) {
                 document.getElementById('tokenBalance').textContent = result.total !== undefined ? formatBalance(result.total) : '--';
                 document.getElementById('evrBalance').textContent = result.total_evr !== undefined ? formatBalance(result.total_evr) : '--';
+
+                // Show/hide no-EVR warning
+                const noEvrWarning = document.getElementById('noEvrWarning');
+                if (noEvrWarning) {
+                    noEvrWarning.style.display = (result.total_evr !== undefined && parseFloat(result.total_evr) <= 0) ? 'block' : 'none';
+                }
 
                 // Update balance labels in send section
                 if (result.vault_balance !== undefined) {
