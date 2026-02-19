@@ -100,6 +100,22 @@ class NetworkDB:
             CREATE INDEX IF NOT EXISTS idx_pred_stream
             ON predictions(stream_name, provider_pubkey, created_at DESC)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS data_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name TEXT NOT NULL UNIQUE,
+                name TEXT,
+                description TEXT,
+                url TEXT NOT NULL,
+                method TEXT NOT NULL DEFAULT 'GET',
+                headers TEXT,
+                cadence_seconds INTEGER NOT NULL,
+                parser_type TEXT NOT NULL DEFAULT 'json_path',
+                parser_config TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL
+            )
+        """)
         # Migration: add stale_since if missing (existing DBs)
         try:
             conn.execute("SELECT stale_since FROM subscriptions LIMIT 1")
@@ -182,14 +198,6 @@ class NetworkDB:
         ))
         conn.commit()
         self.upsert_relay(relay_url)
-        # Auto-create prediction publication for this stream
-        pred_name = stream['stream_name'] + '_pred'
-        self.add_publication(
-            stream_name=pred_name,
-            name=f"Predictions for {stream.get('name') or stream['stream_name']}",
-            cadence_seconds=stream.get('cadence_seconds'),
-            source_stream_name=stream['stream_name'],
-            source_provider_pubkey=stream['nostr_pubkey'])
         return conn.execute(
             "SELECT id FROM subscriptions WHERE stream_name=? AND provider_pubkey=?",
             (stream['stream_name'], stream['nostr_pubkey'])
@@ -280,6 +288,17 @@ class NetworkDB:
         """, (stream_name, provider_pubkey, seq_num, observed_at,
               int(time.time()), value, event_id))
         conn.commit()
+
+    def get_observations(self, stream_name: str, provider_pubkey: str,
+                         limit: int = 50) -> list[dict]:
+        """Return recent observations for a stream."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM observations
+            WHERE stream_name = ? AND provider_pubkey = ?
+            ORDER BY received_at DESC LIMIT ?
+        """, (stream_name, provider_pubkey, limit)).fetchall()
+        return [dict(r) for r in rows]
 
     def last_observation_time(self, stream_name: str,
                               provider_pubkey: str) -> int | None:
@@ -386,11 +405,30 @@ class NetworkDB:
             (stream_name,))
         conn.commit()
 
+    def is_predicting(self, source_stream_name: str,
+                      source_provider_pubkey: str) -> bool:
+        """Check if we have an active prediction publication for a source stream."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT active FROM publications "
+            "WHERE source_stream_name = ? AND source_provider_pubkey = ? "
+            "AND active = 1",
+            (source_stream_name, source_provider_pubkey)).fetchone()
+        return row is not None
+
     def get_active_publications(self) -> list[dict]:
         """Return all active publications."""
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT * FROM publications WHERE active = 1 ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_publications(self) -> list[dict]:
+        """Return all publications including soft-deleted."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM publications ORDER BY active DESC, created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -462,3 +500,72 @@ class NetworkDB:
             "UPDATE predictions SET published = 1 WHERE id = ?",
             (prediction_id,))
         conn.commit()
+
+    # ── Data Sources ─────────────────────────────────────────────
+
+    def add_data_source(self, stream_name: str, url: str,
+                        cadence_seconds: int, parser_type: str,
+                        parser_config: str, name: str = '',
+                        description: str = '', method: str = 'GET',
+                        headers: str = None) -> int:
+        """Register an external data source. Returns row id."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO data_sources
+                (stream_name, name, description, url, method, headers,
+                 cadence_seconds, parser_type, parser_config, active,
+                 created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            ON CONFLICT(stream_name) DO UPDATE SET
+                active = 1,
+                name = excluded.name,
+                description = excluded.description,
+                url = excluded.url,
+                method = excluded.method,
+                headers = excluded.headers,
+                cadence_seconds = excluded.cadence_seconds,
+                parser_type = excluded.parser_type,
+                parser_config = excluded.parser_config
+        """, (
+            stream_name, name, description, url, method, headers,
+            cadence_seconds, parser_type, parser_config,
+            int(time.time()),
+        ))
+        conn.commit()
+        return conn.execute(
+            "SELECT id FROM data_sources WHERE stream_name=?",
+            (stream_name,)).fetchone()[0]
+
+    def remove_data_source(self, stream_name: str):
+        """Soft-delete a data source."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE data_sources SET active = 0 WHERE stream_name = ?",
+            (stream_name,))
+        conn.commit()
+
+    def get_active_data_sources(self) -> list[dict]:
+        """Return all active data sources."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM data_sources WHERE active = 1 "
+            "ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_data_sources(self) -> list[dict]:
+        """Return all data sources including soft-deleted."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM data_sources "
+            "ORDER BY active DESC, created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_data_source(self, stream_name: str) -> dict | None:
+        """Return a single data source by stream_name."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM data_sources WHERE stream_name = ?",
+            (stream_name,)).fetchone()
+        return dict(row) if row else None

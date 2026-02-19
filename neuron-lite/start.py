@@ -176,13 +176,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             time.sleep(delay)
 
     async def _networkReconcileLoop(self):
-        """Reconciliation loop: ensures we are subscribed to all desired streams.
+        """Reconciliation loop: ensures we are subscribed to all desired streams
+        and fetches data sources on their cadence.
 
         Every 5 minutes:
-        1. Get relay list from central
-        2. Get desired subscriptions from local DB
-        3. For each relay with desired subscriptions: connect, discover, subscribe
-        4. Disconnect from relays with no desired subscriptions
+        1. Reconcile subscriptions (connect, discover, subscribe)
+        2. Fetch any data sources that are due
         """
         from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
 
@@ -191,6 +190,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await self._networkReconcile(SatoriNostrConfig)
             except Exception as e:
                 logging.error(f'Network reconcile error: {e}')
+            try:
+                await self._networkFetchDataSources()
+            except Exception as e:
+                logging.error(f'Network data source fetch error: {e}')
             await asyncio.sleep(300)
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
@@ -257,12 +260,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.event_id,
                     obs.observation.seq_num if obs.observation else None,
                     obs.observation.timestamp if obs.observation else None)
-                # Mock engine: echo observation value as prediction
+                # Run engine only if we're predicting this stream
                 if obs.observation:
-                    await self._networkRunEngine(
-                        obs.stream_name,
-                        obs.nostr_pubkey,
-                        obs.observation)
+                    predicting = await asyncio.to_thread(
+                        self.networkDB.is_predicting,
+                        obs.stream_name, obs.nostr_pubkey)
+                    if predicting:
+                        await self._networkRunEngine(
+                            obs.stream_name,
+                            obs.nostr_pubkey,
+                            obs.observation)
         except asyncio.CancelledError:
             return
         except Exception as e:
@@ -403,6 +410,115 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             finally:
                 loop.close()
         threading.Thread(target=run, daemon=True).start()
+
+    async def _networkFetchDataSources(self):
+        """Poll active data sources and publish values that are due.
+
+        For each active data source, checks whether enough time has passed
+        since the last publish (based on cadence_seconds). If due, fetches the
+        URL, runs the parser, and publishes the extracted value.
+        """
+        import json as json_mod
+        import requests as http_requests
+
+        sources = await asyncio.to_thread(
+            self.networkDB.get_active_data_sources)
+        if not sources:
+            return
+
+        # Build a lookup of publications by stream_name for last_published_at
+        pubs = await asyncio.to_thread(
+            self.networkDB.get_active_publications)
+        pub_map = {p['stream_name']: p for p in pubs}
+
+        now = int(time.time())
+
+        for src in sources:
+            stream_name = src['stream_name']
+            cadence = src['cadence_seconds']
+            pub = pub_map.get(stream_name)
+            if not pub:
+                continue
+
+            last = pub.get('last_published_at') or 0
+            if now - last < cadence:
+                continue  # not due yet
+
+            # Fetch
+            try:
+                url = src['url']
+                method = src.get('method', 'GET').upper()
+                headers = None
+                if src.get('headers'):
+                    try:
+                        headers = json_mod.loads(src['headers'])
+                    except Exception:
+                        headers = None
+
+                if method == 'POST':
+                    resp = await asyncio.to_thread(
+                        lambda: http_requests.post(
+                            url, headers=headers, timeout=15))
+                else:
+                    resp = await asyncio.to_thread(
+                        lambda: http_requests.get(
+                            url, headers=headers, timeout=15))
+                resp.raise_for_status()
+                raw = resp.text
+            except Exception as e:
+                logging.warning(
+                    f'Network: fetch failed for {stream_name}: {e}')
+                continue
+
+            # Parse
+            try:
+                parser_type = src.get('parser_type', 'json_path')
+                parser_config = src.get('parser_config', '')
+
+                if parser_type == 'json_path':
+                    obj = json_mod.loads(raw)
+                    for key in parser_config.split('.'):
+                        if key.isdigit():
+                            obj = obj[int(key)]
+                        else:
+                            obj = obj[key]
+                    value = str(obj)
+                elif parser_type == 'python':
+                    local_vars = {'text': raw}
+                    exec_code = parser_config.strip()
+                    if ('return ' in exec_code
+                            and not exec_code.startswith('def ')):
+                        exec_code = (
+                            'def _parse(text):\n' +
+                            '\n'.join(
+                                '    ' + l
+                                for l in exec_code.split('\n')) +
+                            '\n_result = _parse(text)')
+                        exec(exec_code, {}, local_vars)
+                        value = str(local_vars.get('_result', ''))
+                    else:
+                        exec(exec_code, {}, local_vars)
+                        value = str(local_vars.get(
+                            'result', local_vars.get('_result', '')))
+                else:
+                    logging.warning(
+                        f'Network: unknown parser type '
+                        f'{parser_type} for {stream_name}')
+                    continue
+            except Exception as e:
+                logging.warning(
+                    f'Network: parse failed for {stream_name}: {e}')
+                continue
+
+            # Publish
+            try:
+                await self._networkPublishObservation(stream_name, value)
+                logging.info(
+                    f'Network: data source {stream_name} published',
+                    color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: publish failed for {stream_name}: {e}')
 
     async def _networkDiscover(self, ConfigClass):
         """On-demand discovery: connect to all relays, find all streams.
