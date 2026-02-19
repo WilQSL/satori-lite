@@ -1385,10 +1385,20 @@ def register_routes(app):
                 return jsonify({'error': 'No streams configured'}), 404
 
             try:
-                limit = int(request.args.get('limit', 100))
+                limit = int(request.args.get('limit', 0))
             except (TypeError, ValueError):
-                limit = 100
-            limit = max(10, min(limit, 500))
+                limit = 0
+            limit = max(0, min(limit, 50000))
+
+            raw_days = (request.args.get('days', '10') or '10').strip().lower()
+            if raw_days == 'all':
+                window_days = None
+            else:
+                try:
+                    parsed_days = int(raw_days)
+                except (TypeError, ValueError):
+                    parsed_days = 10
+                window_days = parsed_days if parsed_days > 0 else 10
 
             requested_stream = request.args.get('stream_uuid')
             selected_model = None
@@ -1448,8 +1458,38 @@ def register_routes(app):
             if obs_uuid is None and pred_uuid in pred_to_obs:
                 obs_uuid = pred_to_obs.get(pred_uuid)
 
+            import pandas as pd
+
+            def normalize_ts_column(frame: pd.DataFrame) -> pd.Series:
+                ts_values = frame['ts']
+                parsed = pd.to_datetime(ts_values, errors='coerce', utc=True)
+                numeric = pd.to_numeric(ts_values, errors='coerce')
+                numeric_mask = numeric.notna()
+                if numeric_mask.any():
+                    median_abs = float(numeric[numeric_mask].abs().median())
+                    if median_abs < 1e11:
+                        unit = 's'
+                    elif median_abs < 1e14:
+                        unit = 'ms'
+                    else:
+                        unit = 'ns'
+                    parsed.loc[numeric_mask] = pd.to_datetime(
+                        numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                    )
+                return parsed
+
+            def apply_window(frame: pd.DataFrame) -> pd.DataFrame:
+                frame = frame.reset_index()
+                if window_days is not None:
+                    ts_parsed = normalize_ts_column(frame)
+                    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=window_days)
+                    frame = frame[ts_parsed >= cutoff].copy()
+                if limit > 0:
+                    frame = frame.tail(limit)
+                return frame.reset_index(drop=True)
+
             obs_df_raw = storage.getStreamData(obs_uuid) if obs_uuid else None
-            obs_df = obs_df_raw.tail(limit).reset_index() if obs_df_raw is not None and not obs_df_raw.empty else None
+            obs_df = apply_window(obs_df_raw) if obs_df_raw is not None and not obs_df_raw.empty else None
             observations = [
                 {'ts': str(row['ts']), 'value': float(row['value'])}
                 for _, row in obs_df.iterrows()
@@ -1465,14 +1505,13 @@ def register_routes(app):
                     'stats': {}
                 })
 
-            pred_df = pred_df.tail(limit).reset_index()
+            pred_df = apply_window(pred_df)
             predictions = [
                 {'ts': str(row['ts']), 'value': float(row['value'])}
                 for _, row in pred_df.iterrows()
             ]
 
             # Calculate accuracy: match each prediction to the next observation
-            import pandas as pd
             accuracy_data = []
             if obs_df is None or obs_df.empty:
                 return jsonify({
@@ -1493,7 +1532,7 @@ def register_routes(app):
                     # Convert pred_ts to match obs_df['ts'] dtype
                     if pd.api.types.is_datetime64_any_dtype(obs_df['ts']):
                         # Observations are datetime - convert pred_ts to datetime
-                        pred_ts_compare = pd.to_datetime(pred_ts)
+                        pred_ts_compare = pd.to_datetime(pred_ts, utc=True)
                     elif pd.api.types.is_numeric_dtype(obs_df['ts']):
                         # Observations are numeric (Unix timestamps)
                         # Try to convert pred_ts to numeric
@@ -1555,7 +1594,8 @@ def register_routes(app):
                 'observations': observations,
                 'predictions': predictions,
                 'accuracy': accuracy_data,
-                'stats': stats
+                'stats': stats,
+                'window_days': window_days
             })
 
         except Exception as e:

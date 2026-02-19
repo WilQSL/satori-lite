@@ -22,9 +22,5 @@ logging.setup(
     stdoutAndFile=False
 )
 
-<<<<<<< HEAD
-VERSION = 'v1.7.1'
-=======
-VERSION = 'v1.7.2-beta'
->>>>>>> afd84ee (UI: add loading overlays and bump version to v1.7.2-beta)
+VERSION = 'v1.7.3-beta'
 MOTTO = 'Let your workings remain a mystery, just show people the results.'
