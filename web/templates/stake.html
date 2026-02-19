@@ -7,10 +7,10 @@
 {% include 'partials/navbar.html' %}
 
 <div class="container-fluid py-4">
-    <div class="row g-4">
+    <div class="row g-4" id="stakeLayoutRow">
 
         <!-- Pool Staking Section -->
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_staking">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
@@ -54,7 +54,7 @@
         </div>
 
         <!-- Pool Management Section -->
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_management">
             <div class="card h-100">
                 <div class="card-header">
                     <h5 class="mb-0">
@@ -145,6 +145,53 @@
     let isStakingToPool = false;
     let isOpenPool = false;
     let hasWorkers = false;
+    const stakeLayoutStorageKey = 'satori-stake-layout-v1';
+
+    function saveStakeLayout() {
+        const row = document.getElementById('stakeLayoutRow');
+        if (!row) return;
+        const order = Array.from(row.querySelectorAll('.dashboard-widget-col'))
+            .map((el) => el.dataset.widgetId)
+            .filter(Boolean);
+        localStorage.setItem(stakeLayoutStorageKey, JSON.stringify(order));
+    }
+
+    function applyStakeLayout() {
+        const row = document.getElementById('stakeLayoutRow');
+        if (!row) return;
+        const raw = localStorage.getItem(stakeLayoutStorageKey);
+        if (!raw) return;
+        let order = null;
+        try {
+            order = JSON.parse(raw);
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(order)) return;
+        const map = new Map(Array.from(row.querySelectorAll('.dashboard-widget-col')).map((el) => [el.dataset.widgetId, el]));
+        order.forEach((id) => {
+            const el = map.get(id);
+            if (el) row.appendChild(el);
+        });
+        map.forEach((el) => {
+            if (!order.includes(el.dataset.widgetId)) row.appendChild(el);
+        });
+    }
+
+    function initStakeDragDrop() {
+        const row = document.getElementById('stakeLayoutRow');
+        if (!row || typeof Sortable === 'undefined') return;
+        Sortable.create(row, {
+            animation: 180,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            draggable: '.dashboard-widget-col',
+            ghostClass: 'dragging',
+            chosenClass: 'drop-target',
+            filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
+            preventOnFilter: false,
+            onEnd: () => saveStakeLayout(),
+        });
+    }
 
     // Helper function to format balance values (removes trailing zeros)
     function formatBalance(value) {
@@ -574,6 +621,9 @@
 
     // Load all data on page load
     document.addEventListener('DOMContentLoaded', () => {
+        applyStakeLayout();
+        initStakeDragDrop();
+
         loadStakingStatus();
         loadWorkers();
         loadLenders();
