@@ -86,6 +86,14 @@
         color: var(--text-secondary);
         font-size: 0.8rem;
     }
+    .range-btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+    .range-btn {
+        min-width: 48px;
+    }
 </style>
 {% endblock %}
 
@@ -98,6 +106,16 @@
             <div class="card">
                 <div class="card-body">
                     <div class="row g-3 align-items-end">
+                        <div class="col-12">
+                            <label class="form-label">Data window</label>
+                            <div class="range-btn-group" id="rangeButtons">
+                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="1">1d</button>
+                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="5">5d</button>
+                                <button type="button" class="btn btn-primary btn-sm range-btn" data-days="10">10d</button>
+                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="30">30d</button>
+                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="all">All</button>
+                            </div>
+                        </div>
                         <div class="col-12 col-lg-6">
                             <label for="streamSelect" class="form-label">Local stream</label>
                             <select id="streamSelect" class="form-select"></select>
@@ -227,6 +245,7 @@ let errorChart = null;
 let currentStream = '';
 let allStreams = [];
 let loadingHideTimer = null;
+let currentRangeDays = '10';
 
 function showToast(message, isError = false) {
     const toast = document.getElementById('statusToast');
@@ -274,6 +293,19 @@ function hideLoading() {
         overlay.setAttribute('aria-hidden', 'true');
         loadingHideTimer = null;
     }, 220);
+}
+
+function rangeLabel(daysValue) {
+    return daysValue === 'all' ? 'all available history' : `last ${daysValue} day(s)`;
+}
+
+function setActiveRangeButton(daysValue) {
+    document.querySelectorAll('#rangeButtons [data-days]').forEach((btn) => {
+        const isActive = btn.dataset.days === String(daysValue);
+        btn.classList.toggle('active', isActive);
+        btn.classList.toggle('btn-primary', isActive);
+        btn.classList.toggle('btn-outline-light', !isActive);
+    });
 }
 
 function sliderToSeconds(sliderValue) {
@@ -587,10 +619,12 @@ async function loadPerformance() {
 
     currentStream = streamUuid;
     setStatus('Loading predictions for selected stream...', 'secondary');
-    showLoading('Loading local predictions...', 'Fetching predictions and observations...', 70);
+    showLoading('Loading local predictions...', `Fetching ${rangeLabel(currentRangeDays)}...`, 70);
 
     try {
-        const data = await fetchJson(`/api/engine/performance?stream_uuid=${encodeURIComponent(streamUuid)}&limit=500`);
+        const data = await fetchJson(
+            `/api/engine/performance?stream_uuid=${encodeURIComponent(streamUuid)}&days=${encodeURIComponent(currentRangeDays)}`
+        );
         updateLoading('Processing and rendering charts...', 88);
         const observations = data.observations || [];
         const predictions = data.predictions || [];
@@ -605,7 +639,7 @@ async function loadPerformance() {
         renderRows(predictions, accuracy);
 
         setStatus(
-            `Loaded ${predictions.length} predictions and ${observations.length} observations for ${getStreamDisplayName(stream)} (${shortUuid(streamUuid)}).`,
+            `Loaded ${predictions.length} predictions and ${observations.length} observations for ${getStreamDisplayName(stream)} (${shortUuid(streamUuid)}), window: ${rangeLabel(currentRangeDays)}.`,
             'success'
         );
         hideLoading();
@@ -616,6 +650,19 @@ async function loadPerformance() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    setActiveRangeButton(currentRangeDays);
+    document.querySelectorAll('#rangeButtons [data-days]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const nextRange = btn.dataset.days;
+            if (nextRange === currentRangeDays) {
+                return;
+            }
+            currentRangeDays = nextRange;
+            setActiveRangeButton(currentRangeDays);
+            await loadPerformance();
+        });
+    });
+
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         await loadPerformance();
     });
