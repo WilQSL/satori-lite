@@ -39,6 +39,96 @@
     .table-sm td, .table-sm th {
         vertical-align: middle;
     }
+    .analytics-table {
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    .analytics-table thead th {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
+        border-bottom: 1px solid var(--border-color);
+        padding-top: 0.65rem;
+        padding-bottom: 0.65rem;
+        background: var(--bg-card);
+    }
+    .analytics-table tbody td {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        font-size: 0.86rem;
+    }
+    .analytics-table tbody tr:hover td {
+        background: rgba(90, 90, 255, 0.06) !important;
+    }
+    .numeric-cell {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-family: Consolas, "Courier New", monospace;
+    }
+    .time-cell {
+        min-width: 152px;
+        font-variant-numeric: tabular-nums;
+        font-family: Consolas, "Courier New", monospace;
+        color: var(--text-secondary);
+    }
+    .delta-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.2rem;
+        border-radius: 999px;
+        padding: 0.12rem 0.42rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+    .delta-chip.low {
+        color: #22c55e;
+        background: rgba(34, 197, 94, 0.16);
+    }
+    .delta-chip.mid {
+        color: #f59e0b;
+        background: rgba(245, 158, 11, 0.16);
+    }
+    .delta-chip.high {
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.16);
+    }
+    .subtle-value {
+        color: var(--text-secondary);
+    }
+    .analytic-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.2rem;
+        border-radius: 999px;
+        padding: 0.12rem 0.45rem;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+    .analytic-pill.up {
+        color: #22c55e;
+        background: rgba(34, 197, 94, 0.14);
+    }
+    .analytic-pill.down {
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.14);
+    }
+    .analytic-pill.flat {
+        color: #9ca3af;
+        background: rgba(156, 163, 175, 0.12);
+    }
+    .obs-change-up {
+        color: #22c55e;
+        font-weight: 600;
+    }
+    .obs-change-down {
+        color: #ef4444;
+        font-weight: 600;
+    }
+    .obs-change-flat {
+        color: #9ca3af;
+        font-weight: 600;
+    }
     .mono {
         font-family: Consolas, "Courier New", monospace;
     }
@@ -94,6 +184,58 @@
     .range-btn {
         min-width: 48px;
     }
+    .stream-picker-btn {
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+    }
+    .stream-picker-btn:hover,
+    .stream-picker-btn:focus {
+        background: var(--bg-input-focus);
+        border-color: var(--border-color-focus);
+        color: var(--text-primary);
+    }
+    .stream-picker-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: calc(100% - 24px);
+        font-weight: 600;
+    }
+    .stream-dropdown-menu {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        min-width: 100%;
+        max-height: 360px;
+        overflow: hidden;
+    }
+    .stream-list {
+        max-height: 260px;
+        overflow-y: auto;
+    }
+    .stream-option {
+        border-radius: 6px;
+        margin-bottom: 0.2rem;
+        color: var(--text-primary);
+        background: transparent;
+        border: 1px solid transparent;
+    }
+    .stream-option.active,
+    .stream-option:hover {
+        background: rgba(90, 90, 255, 0.14);
+        border-color: rgba(90, 90, 255, 0.3);
+        color: var(--text-primary);
+    }
+    .stream-option .title {
+        font-weight: 600;
+    }
+    .stream-option .meta {
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+    }
 </style>
 {% endblock %}
 
@@ -101,12 +243,12 @@
 {% include 'partials/navbar.html' %}
 
 <div class="container-fluid py-4">
-    <div class="row g-4">
-        <div class="col-12">
+    <div class="row g-4" id="localPredictionsLayoutRow">
+        <div class="col-12 dashboard-widget-col" data-widget-id="lp_filters">
             <div class="card">
                 <div class="card-body">
                     <div class="row g-3 align-items-end">
-                        <div class="col-12">
+                        <div class="col-12 col-lg-5">
                             <label class="form-label">Data window</label>
                             <div class="range-btn-group" id="rangeButtons">
                                 <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="1">1d</button>
@@ -116,11 +258,29 @@
                                 <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="all">All</button>
                             </div>
                         </div>
-                        <div class="col-12 col-lg-6">
-                            <label for="streamSelect" class="form-label">Local stream</label>
-                            <select id="streamSelect" class="form-select"></select>
+                        <div class="col-12 col-lg-5">
+                            <label for="streamDropdownBtn" class="form-label">Local stream</label>
+                            <div class="dropdown">
+                                <button class="btn stream-picker-btn w-100 d-flex justify-content-between align-items-center"
+                                        type="button"
+                                        id="streamDropdownBtn"
+                                        data-bs-toggle="dropdown"
+                                        data-bs-auto-close="outside"
+                                        aria-expanded="false">
+                                    <span class="stream-picker-label" id="streamDropdownLabel">Select stream</span>
+                                    <i class="material-icons align-middle" style="font-size: 18px;">expand_more</i>
+                                </button>
+                                <div class="dropdown-menu stream-dropdown-menu p-2" aria-labelledby="streamDropdownBtn">
+                                    <div class="input-group input-group-sm mb-2">
+                                        <span class="input-group-text"><i class="material-icons align-middle" style="font-size: 16px;">search</i></span>
+                                        <input type="text" class="form-control" id="streamSearchInput" placeholder="Find stream...">
+                                    </div>
+                                    <div id="streamDropdownList" class="stream-list"></div>
+                                </div>
+                            </div>
+                            <select id="streamSelect" class="d-none"></select>
                         </div>
-                        <div class="col-12 col-lg-6 d-flex justify-content-lg-end">
+                        <div class="col-12 col-lg-2 d-flex justify-content-lg-end">
                             <button class="btn btn-primary" id="refreshBtn">
                                 <i class="material-icons align-middle me-1" style="font-size: 16px;">refresh</i>
                                 Refresh
@@ -138,32 +298,32 @@
             </div>
         </div>
 
-        <div class="col-12 col-md-6 col-xl-3">
+        <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_obs">
             <div class="card h-100"><div class="card-body">
                 <div class="metric-value" id="obsCount">0</div>
                 <div class="metric-label">Observations</div>
             </div></div>
         </div>
-        <div class="col-12 col-md-6 col-xl-3">
+        <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_pred">
             <div class="card h-100"><div class="card-body">
                 <div class="metric-value" id="predCount">0</div>
                 <div class="metric-label">Predictions</div>
             </div></div>
         </div>
-        <div class="col-12 col-md-6 col-xl-3">
+        <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_avgerr">
             <div class="card h-100"><div class="card-body">
                 <div class="metric-value" id="avgAbsError">-</div>
                 <div class="metric-label">Avg absolute error</div>
             </div></div>
         </div>
-        <div class="col-12 col-md-6 col-xl-3">
+        <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_acc">
             <div class="card h-100"><div class="card-body">
                 <div class="metric-value" id="accuracyPct">-</div>
                 <div class="metric-label">Accuracy</div>
             </div></div>
         </div>
 
-        <div class="col-12 col-xl-6">
+        <div class="col-12 col-xl-6 dashboard-widget-col" data-widget-id="lp_chart_pred">
             <div class="card">
                 <div class="card-header">
                     <h6 class="mb-0">Observations vs predictions</h6>
@@ -176,7 +336,7 @@
             </div>
         </div>
 
-        <div class="col-12 col-xl-6">
+        <div class="col-12 col-xl-6 dashboard-widget-col" data-widget-id="lp_chart_err">
             <div class="card">
                 <div class="card-header">
                     <h6 class="mb-0">Prediction error (absolute)</h6>
@@ -189,23 +349,29 @@
             </div>
         </div>
 
-        <div class="col-12">
+        <div class="col-12 dashboard-widget-col" data-widget-id="lp_table">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">Recent local predictions</h6>
+                    <button class="btn btn-outline-secondary btn-sm" id="exportCsvBtn">
+                        <i class="material-icons align-middle me-1" style="font-size: 16px;">download</i>
+                        Export CSV
+                    </button>
                 </div>
                 <div class="card-body table-responsive" style="max-height: 360px;">
-                    <table class="table table-sm table-hover mb-0">
+                    <table class="table table-sm table-hover mb-0 analytics-table">
                         <thead>
                             <tr>
                                 <th>Prediction time</th>
-                                <th>Predicted</th>
-                                <th>Matched observation</th>
-                                <th>Abs error</th>
+                                <th>Trend</th>
+                                <th class="text-end">Predicted</th>
+                                <th class="text-end">Matched observation</th>
+                                <th>Obs change</th>
+                                <th class="text-end">Abs error</th>
                             </tr>
                         </thead>
                         <tbody id="predictionRows">
-                            <tr><td colspan="4" class="text-muted">Loading...</td></tr>
+                            <tr><td colspan="6" class="text-muted">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -246,6 +412,8 @@ let currentStream = '';
 let allStreams = [];
 let loadingHideTimer = null;
 let currentRangeDays = '10';
+const localPredictionsLayoutStorageKey = 'satori-local-predictions-layout-v1';
+let currentTableRows = [];
 
 function showToast(message, isError = false) {
     const toast = document.getElementById('statusToast');
@@ -293,6 +461,53 @@ function hideLoading() {
         overlay.setAttribute('aria-hidden', 'true');
         loadingHideTimer = null;
     }, 220);
+}
+
+function saveLocalPredictionsLayout() {
+    const row = document.getElementById('localPredictionsLayoutRow');
+    if (!row) return;
+    const order = Array.from(row.querySelectorAll('.dashboard-widget-col'))
+        .map((el) => el.dataset.widgetId)
+        .filter(Boolean);
+    localStorage.setItem(localPredictionsLayoutStorageKey, JSON.stringify(order));
+}
+
+function applyLocalPredictionsLayout() {
+    const row = document.getElementById('localPredictionsLayoutRow');
+    if (!row) return;
+    const raw = localStorage.getItem(localPredictionsLayoutStorageKey);
+    if (!raw) return;
+    let order = null;
+    try {
+        order = JSON.parse(raw);
+    } catch (e) {
+        return;
+    }
+    if (!Array.isArray(order)) return;
+
+    const map = new Map(Array.from(row.querySelectorAll('.dashboard-widget-col')).map((el) => [el.dataset.widgetId, el]));
+    order.forEach((id) => {
+        const el = map.get(id);
+        if (el) row.appendChild(el);
+    });
+    map.forEach((el) => {
+        if (!order.includes(el.dataset.widgetId)) row.appendChild(el);
+    });
+}
+
+function initLocalPredictionsDragDrop() {
+    const row = document.getElementById('localPredictionsLayoutRow');
+    if (!row || typeof Sortable === 'undefined') return;
+    Sortable.create(row, {
+        animation: 180,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        draggable: '.dashboard-widget-col',
+        ghostClass: 'dragging',
+        chosenClass: 'drop-target',
+        filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
+        preventOnFilter: false,
+        onEnd: () => saveLocalPredictionsLayout(),
+    });
 }
 
 function rangeLabel(daysValue) {
@@ -414,6 +629,13 @@ function formatNumber(value, decimals = 4) {
     return Number(value).toFixed(decimals);
 }
 
+function formatSigned(value, decimals = 4) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+    const n = Number(value);
+    if (Math.abs(n) < 1e-12) return '0.0000';
+    return `${n > 0 ? '+' : ''}${n.toFixed(decimals)}`;
+}
+
 function setStatus(message, type = 'secondary') {
     const box = document.getElementById('statusBox');
     box.className = `mt-3 alert alert-${type} mb-0`;
@@ -451,9 +673,63 @@ function updateStreamMeta(stream) {
     `;
 }
 
+function updateStreamDropdownLabel() {
+    const stream = allStreams.find((s) => s.stream_uuid === currentStream);
+    const label = document.getElementById('streamDropdownLabel');
+    if (!label) return;
+    label.textContent = stream ? getStreamDisplayName(stream) : 'Select stream';
+}
+
+function renderStreamDropdownOptions(filterText = '') {
+    const list = document.getElementById('streamDropdownList');
+    const select = document.getElementById('streamSelect');
+    if (!list || !select) return;
+
+    const q = (filterText || '').trim().toLowerCase();
+    const ordered = allStreams.slice().sort((a, b) => {
+        const an = getStreamDisplayName(a).toLowerCase();
+        const bn = getStreamDisplayName(b).toLowerCase();
+        return an.localeCompare(bn);
+    });
+    const filtered = q
+        ? ordered.filter((s) => getStreamDisplayName(s).toLowerCase().includes(q))
+        : ordered;
+
+    list.innerHTML = '';
+    if (!filtered.length) {
+        list.innerHTML = '<div class="text-muted small p-2">No matching streams</div>';
+        return;
+    }
+
+    filtered.forEach((stream, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `dropdown-item stream-option ${stream.stream_uuid === currentStream ? 'active' : ''}`;
+        btn.innerHTML = `
+            <div class="title">${getStreamDisplayName(stream, index)}</div>
+            <div class="meta">${stream.stream_name ? stream.stream_name : 'Local prediction stream'}</div>
+        `;
+        btn.addEventListener('click', async () => {
+            currentStream = stream.stream_uuid;
+            select.value = currentStream;
+            updateStreamDropdownLabel();
+            updateStreamMeta(stream);
+            renderStreamDropdownOptions(document.getElementById('streamSearchInput')?.value || '');
+            const dropdownBtn = document.getElementById('streamDropdownBtn');
+            if (dropdownBtn) {
+                bootstrap.Dropdown.getOrCreateInstance(dropdownBtn).hide();
+            }
+            await loadPerformance();
+        });
+        list.appendChild(btn);
+    });
+}
+
 async function loadStreams() {
     const select = document.getElementById('streamSelect');
+    const dropdownBtn = document.getElementById('streamDropdownBtn');
     select.disabled = true;
+    if (dropdownBtn) dropdownBtn.disabled = true;
     setStatus('Loading streams...', 'secondary');
     showLoading('Loading local predictions...', 'Fetching stream list...', 15);
 
@@ -468,6 +744,8 @@ async function loadStreams() {
         select.innerHTML = '';
         if (streams.length === 0) {
             select.innerHTML = '<option value="">No local streams found</option>';
+            renderStreamDropdownOptions('');
+            updateStreamDropdownLabel();
             updateMetrics({}, [], [], []);
             renderRows([], []);
             updateStreamMeta(null);
@@ -479,7 +757,7 @@ async function loadStreams() {
         streams.forEach((stream, index) => {
             const option = document.createElement('option');
             option.value = stream.stream_uuid;
-            option.textContent = `${getStreamDisplayName(stream, index)} | ${shortUuid(stream.stream_uuid)}`;
+            option.textContent = getStreamDisplayName(stream, index);
             select.appendChild(option);
         });
 
@@ -491,6 +769,8 @@ async function loadStreams() {
         }
 
         updateStreamMeta(streams.find((s) => s.stream_uuid === select.value));
+        updateStreamDropdownLabel();
+        renderStreamDropdownOptions(document.getElementById('streamSearchInput')?.value || '');
         updateLoading('Loading selected stream performance...', 62);
         await loadPerformance();
     } catch (error) {
@@ -499,6 +779,7 @@ async function loadStreams() {
         hideLoading();
     } finally {
         select.disabled = false;
+        if (dropdownBtn) dropdownBtn.disabled = false;
     }
 }
 
@@ -584,30 +865,116 @@ function renderErrorChart(accuracy) {
 function renderRows(predictions, accuracy) {
     const tbody = document.getElementById('predictionRows');
     if (!predictions.length) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No local predictions found.</td></tr>';
+        currentTableRows = [];
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No local predictions found.</td></tr>';
         return;
     }
 
     const accuracyByTs = new Map(accuracy.map((a) => [String(a.ts), a]));
-    const rows = predictions
+    const chronological = predictions
         .slice()
-        .reverse()
-        .slice(0, 80)
+        .sort((a, b) => parseTimestamp(a.ts) - parseTimestamp(b.ts))
         .map((prediction) => {
             const item = accuracyByTs.get(String(prediction.ts));
-            const matched = item ? formatNumber(item.actual, 4) : '-';
-            const absError = item ? formatNumber(item.abs_error, 4) : '-';
+            return {
+                prediction_ts: prediction.ts,
+                predicted: Number(prediction.value),
+                matched_observation: item && item.actual !== undefined ? Number(item.actual) : null,
+                abs_error: item && item.abs_error !== undefined ? Number(item.abs_error) : null,
+                obs_change: null,
+                trend: 'flat',
+            };
+        });
+
+    for (let i = 0; i < chronological.length; i += 1) {
+        const curr = chronological[i];
+        const prev = chronological[i - 1];
+        if (!curr || curr.matched_observation === null || !prev || prev.matched_observation === null) {
+            curr.obs_change = null;
+            curr.trend = 'flat';
+            continue;
+        }
+        curr.obs_change = curr.matched_observation - prev.matched_observation;
+        if (curr.obs_change > 0) curr.trend = 'up';
+        else if (curr.obs_change < 0) curr.trend = 'down';
+        else curr.trend = 'flat';
+    }
+
+    currentTableRows = chronological.slice();
+
+    const rows = chronological
+        .slice()
+        .reverse()
+        .slice(0, 120)
+        .map((row) => {
+            const trendIcon = row.trend === 'up'
+                ? '<span class="analytic-pill up"><i class="material-icons" style="font-size:14px;">north</i>Up</span>'
+                : row.trend === 'down'
+                    ? '<span class="analytic-pill down"><i class="material-icons" style="font-size:14px;">south</i>Down</span>'
+                    : '<span class="analytic-pill flat"><i class="material-icons" style="font-size:14px;">remove</i>Flat</span>';
+
+            const changeClass = row.obs_change > 0 ? 'obs-change-up' : row.obs_change < 0 ? 'obs-change-down' : 'obs-change-flat';
+            const changeValue = row.obs_change === null ? '-' : formatSigned(row.obs_change, 4);
+            const errorPct = (row.abs_error !== null && row.matched_observation)
+                ? Math.abs((row.abs_error / row.matched_observation) * 100)
+                : null;
+            const errorClass = errorPct === null ? 'mid' : errorPct < 0.8 ? 'low' : errorPct < 2.0 ? 'mid' : 'high';
+            const errorDisplay = row.abs_error === null
+                ? '-'
+                : `<span class="delta-chip ${errorClass}">${formatNumber(row.abs_error, 4)}</span>`;
+
             return `
                 <tr>
-                    <td title="${prediction.ts}">${formatDateTime(prediction.ts)}</td>
-                    <td>${formatNumber(prediction.value, 4)}</td>
-                    <td>${matched}</td>
-                    <td>${absError}</td>
+                    <td class="time-cell" title="${row.prediction_ts}">${formatDateTime(row.prediction_ts)}</td>
+                    <td>${trendIcon}</td>
+                    <td class="numeric-cell">${formatNumber(row.predicted, 4)}</td>
+                    <td class="numeric-cell">${row.matched_observation === null ? '<span class="subtle-value">-</span>' : formatNumber(row.matched_observation, 4)}</td>
+                    <td class="${changeClass}">${changeValue}</td>
+                    <td class="numeric-cell">${errorDisplay}</td>
                 </tr>
             `;
         });
 
     tbody.innerHTML = rows.join('');
+}
+
+function exportCurrentTableToCsv() {
+    if (!currentTableRows.length) {
+        showToast('No prediction rows to export', true);
+        return;
+    }
+
+    const headers = ['prediction_time', 'trend', 'predicted', 'matched_observation', 'observation_change', 'abs_error'];
+    const csvRows = [headers.join(',')];
+
+    currentTableRows.forEach((row) => {
+        const fields = [
+            `"${String(row.prediction_ts).replace(/"/g, '""')}"`,
+            row.trend,
+            row.predicted ?? '',
+            row.matched_observation ?? '',
+            row.obs_change ?? '',
+            row.abs_error ?? '',
+        ];
+        csvRows.push(fields.join(','));
+    });
+
+    const stream = allStreams.find((s) => s.stream_uuid === currentStream);
+    const streamName = (getStreamDisplayName(stream) || 'stream').replace(/[^a-z0-9_\-]+/gi, '_').toLowerCase();
+    const now = new Date();
+    const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const fileName = `local_predictions_${streamName}_${currentRangeDays}d_${stamp}.csv`;
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast(`CSV exported (${currentTableRows.length} rows)`);
 }
 
 async function loadPerformance() {
@@ -650,6 +1017,9 @@ async function loadPerformance() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    applyLocalPredictionsLayout();
+    initLocalPredictionsDragDrop();
+
     setActiveRangeButton(currentRangeDays);
     document.querySelectorAll('#rangeButtons [data-days]').forEach((btn) => {
         btn.addEventListener('click', async () => {
@@ -666,10 +1036,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         await loadPerformance();
     });
-    document.getElementById('streamSelect').addEventListener('change', async () => {
-        const stream = allStreams.find((s) => s.stream_uuid === document.getElementById('streamSelect').value);
-        updateStreamMeta(stream);
-        await loadPerformance();
+    document.getElementById('exportCsvBtn').addEventListener('click', exportCurrentTableToCsv);
+    document.getElementById('streamSearchInput').addEventListener('input', (event) => {
+        renderStreamDropdownOptions(event.target.value || '');
     });
 
     await loadTrainingDelay();

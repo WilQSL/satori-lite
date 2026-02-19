@@ -10,6 +10,10 @@ from functools import wraps
 import time
 import logging
 import base64
+import os
+import platform
+import socket
+import datetime
 import requests
 import uuid
 from threading import Lock
@@ -28,6 +32,7 @@ from flask import (
 )
 
 logger = logging.getLogger(__name__)
+_process_started_at = time.time()
 
 # Global vault reference (will be set by the application) - used by background processes
 _startup_vault = None
@@ -585,6 +590,137 @@ def register_routes(app):
             'subscriptions_count': len(startup.subscriptions) if hasattr(startup, 'subscriptions') and startup.subscriptions else 0,
             'publications_count': len(startup.publications) if hasattr(startup, 'publications') and startup.publications else 0
         })
+
+    @app.route('/api/system/stats', methods=['GET'])
+    @login_required
+    def get_system_stats():
+        """Return host and process metrics available on current neuron server."""
+        try:
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            payload = {
+                'timestamp_utc': now_utc.isoformat(),
+                'host': {
+                    'hostname': socket.gethostname(),
+                    'platform': platform.platform(),
+                    'system': platform.system(),
+                    'release': platform.release(),
+                    'machine': platform.machine(),
+                    'python_version': platform.python_version(),
+                },
+                'uptime': {
+                    'system_seconds': None,
+                    'system_started_at_utc': None,
+                    'process_seconds': None,
+                },
+                'cpu': {
+                    'logical_cores': os.cpu_count(),
+                    'usage_percent': None,
+                    'load_average_1_5_15': None,
+                },
+                'memory': {
+                    'virtual': None,
+                    'swap': None,
+                },
+                'disk': {
+                    'root': None,
+                },
+                'network': {
+                    'io': None,
+                },
+                'process': {
+                    'pid': os.getpid(),
+                    'thread_count': None,
+                    'cpu_percent': None,
+                    'memory_rss_bytes': None,
+                    'memory_vms_bytes': None,
+                    'open_file_count': None,
+                    'create_time_utc': None,
+                },
+            }
+
+            try:
+                import psutil
+            except Exception:
+                psutil = None
+
+            if psutil is not None:
+                boot_ts = psutil.boot_time()
+                payload['uptime']['system_seconds'] = max(0.0, time.time() - boot_ts)
+                payload['uptime']['system_started_at_utc'] = datetime.datetime.fromtimestamp(
+                    boot_ts, tz=datetime.timezone.utc
+                ).isoformat()
+
+                payload['cpu']['usage_percent'] = psutil.cpu_percent(interval=0.1)
+                try:
+                    payload['cpu']['load_average_1_5_15'] = list(os.getloadavg())
+                except Exception:
+                    payload['cpu']['load_average_1_5_15'] = None
+
+                vm = psutil.virtual_memory()
+                payload['memory']['virtual'] = {
+                    'total_bytes': vm.total,
+                    'available_bytes': vm.available,
+                    'used_bytes': vm.used,
+                    'usage_percent': vm.percent,
+                }
+                sw = psutil.swap_memory()
+                payload['memory']['swap'] = {
+                    'total_bytes': sw.total,
+                    'used_bytes': sw.used,
+                    'free_bytes': sw.free,
+                    'usage_percent': sw.percent,
+                }
+
+                root_path = os.path.abspath(os.sep)
+                du = psutil.disk_usage(root_path)
+                payload['disk']['root'] = {
+                    'path': root_path,
+                    'total_bytes': du.total,
+                    'used_bytes': du.used,
+                    'free_bytes': du.free,
+                    'usage_percent': du.percent,
+                }
+
+                nio = psutil.net_io_counters()
+                payload['network']['io'] = {
+                    'bytes_sent': nio.bytes_sent,
+                    'bytes_recv': nio.bytes_recv,
+                    'packets_sent': nio.packets_sent,
+                    'packets_recv': nio.packets_recv,
+                    'errin': nio.errin,
+                    'errout': nio.errout,
+                    'dropin': nio.dropin,
+                    'dropout': nio.dropout,
+                }
+
+                proc = psutil.Process(os.getpid())
+                with proc.oneshot():
+                    proc_create_ts = proc.create_time()
+                    payload['uptime']['process_seconds'] = max(0.0, time.time() - proc_create_ts)
+                    payload['process']['thread_count'] = proc.num_threads()
+                    payload['process']['cpu_percent'] = proc.cpu_percent(interval=0.05)
+                    mem_info = proc.memory_info()
+                    payload['process']['memory_rss_bytes'] = mem_info.rss
+                    payload['process']['memory_vms_bytes'] = mem_info.vms
+                    payload['process']['create_time_utc'] = datetime.datetime.fromtimestamp(
+                        proc_create_ts, tz=datetime.timezone.utc
+                    ).isoformat()
+                    try:
+                        payload['process']['open_file_count'] = len(proc.open_files())
+                    except Exception:
+                        payload['process']['open_file_count'] = None
+            else:
+                payload['warning'] = 'psutil not available; returning limited stats'
+                payload['uptime']['process_seconds'] = max(0.0, time.time() - _process_started_at)
+                try:
+                    payload['cpu']['load_average_1_5_15'] = list(os.getloadavg())
+                except Exception:
+                    payload['cpu']['load_average_1_5_15'] = None
+
+            return jsonify(payload)
+        except Exception as e:
+            logger.error(f"Failed to collect system stats: {e}")
+            return jsonify({'error': str(e)}), 500
 
     # API Proxy Routes
     def get_auth_headers():

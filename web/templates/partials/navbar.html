@@ -1,10 +1,15 @@
-<nav class="navbar navbar-expand-lg px-4">
-    <span class="navbar-brand">
-        Satori
-        <small class="text-muted ms-2" style="font-size: 0.65rem; font-weight: 400; opacity: 0.6;">{{ version }}</small>
+<nav class="navbar navbar-expand-lg px-4 satori-navbar">
+    <span class="navbar-brand satori-brand-wrap">
+        <span class="satori-brand-title">Satori</span>
+        <small class="text-muted satori-brand-version">{{ version }}</small>
     </span>
-    <div class="ms-auto d-flex align-items-center">
-        <div class="dropdown me-3">
+    <span class="satori-nav-item satori-connection">
+        <span class="status-indicator status-online" id="statusIndicator"></span>
+        <span id="statusText" class="d-none d-sm-inline">Connected</span>
+        <span class="text-muted ms-2 d-none d-md-inline" id="sessionCountdownLabel">Auto logout in <span id="sessionCountdown">05:00</span></span>
+    </span>
+    <div class="ms-auto d-flex align-items-center satori-nav-actions">
+        <div class="dropdown satori-nav-item">
             <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="walletDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="material-icons align-middle" style="font-size: 16px;">account_balance_wallet</i>
                 Wallet
@@ -33,28 +38,24 @@
             </ul>
         </div>
 
-        <span class="me-3">
-            <span class="status-indicator status-online" id="statusIndicator"></span>
-            <span id="statusText">Connected</span>
-        </span>
-        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm me-2">
+        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm satori-nav-item">
             <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
             Dashboard
         </a>
-        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm me-2">
+        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm satori-nav-item">
             <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
             Local Predictions
         </a>
-        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm me-2">
+        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm satori-nav-item">
             <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
             Stake Management
         </a>
-        <div class="dropdown me-2">
+        <div class="dropdown satori-nav-item">
             <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                 <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
                 Training
             </button>
-            <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
+            <div class="dropdown-menu dropdown-menu-end p-3 training-menu" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
                 <div class="d-flex align-items-center justify-content-between mb-2">
                     <label class="form-label mb-0">AI Engine Training Frequency</label>
                     <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
@@ -75,8 +76,8 @@
                 </div>
             </div>
         </div>
-        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm satori-nav-item">Logout</a>
+        <button class="theme-toggle satori-nav-item" onclick="toggleTheme()" title="Toggle dark/light mode">
             <i class="material-icons" id="themeIcon">light_mode</i>
         </button>
     </div>
