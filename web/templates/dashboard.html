@@ -297,6 +297,9 @@
                             <p class="text-muted mb-0">Evrmore (EVR)</p>
                         </div>
                     </div>
+                    <p id="noEvrWarning" class="text-muted small mb-0 mt-1" style="display: none; opacity: 0.7;">
+                        Without EVR in your wallet, larger transaction fees will be paid in SATORI.
+                    </p>
                 </div>
             </div>
         </div>
@@ -326,6 +329,469 @@
 
     </div>
 
+    <!-- Relay Settings Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">cell_tower</i>
+                        Relay Settings
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nostr Public Key</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="nostrPubkey"
+                                   value="{{ nostr_pubkey or 'Not generated' }}" readonly
+                                   style="font-family: monospace; font-size: 0.85rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('nostrPubkey')" title="Copy">
+                                <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">
+                            Set this as NOSTR_PUBKEY in your relay's .env file
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Relay URL</label>
+                        <input type="text" class="form-control" id="relayUrl"
+                               value="{{ relay_url or '' }}"
+                               placeholder="wss://your-relay.example.com">
+                        <small class="form-text text-muted">
+                            WebSocket URL of your Nostr relay (must have NIP-11 configured with your pubkey)
+                        </small>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-primary" onclick="registerRelay()">Register Relay</button>
+                        <span id="relayStatus" class="ms-3" style="display: none;"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Subscriptions Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">playlist_add_check</i>
+                        Subscriptions
+                    </h5>
+                    <button id="subsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactiveSubs()">Show Inactive</button>
+                </div>
+                <div class="card-body">
+                    <div id="subsEmpty" class="text-center text-muted py-3">
+                        No active subscriptions.
+                    </div>
+                    <div id="subsTable" style="display: none;">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Stream</th>
+                                        <th>Relay</th>
+                                        <th>Cadence</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="subsList"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- Observations drawer -->
+                    <div id="obsDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
+                        <div class="p-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0" id="obsDrawerTitle">Observations</h6>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="closeObsDrawer()">Close</button>
+                            </div>
+                            <div id="obsChartContainer" style="display: none; max-height: 250px; margin-bottom: 12px;">
+                                <canvas id="obsChart"></canvas>
+                            </div>
+                            <ul class="nav nav-tabs mb-2" id="obsDrawerTabs">
+                                <li class="nav-item">
+                                    <a class="nav-link active" href="#" onclick="switchObsTab('observations', this); return false;">Observations</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="#" onclick="switchObsTab('predictions', this); return false;">Predictions</a>
+                                </li>
+                            </ul>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead id="obsDrawerHead">
+                                        <tr>
+                                            <th>Seq</th>
+                                            <th>Observed At</th>
+                                            <th>Received At</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="obsDrawerBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Publications Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">publish</i>
+                        Publications
+                    </h5>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="resetDataSourceForm(); toggleDataSourceForm()">New Data Source</button>
+                        <button class="btn btn-sm btn-outline-success" onclick="downloadCsvTemplate()">CSV Template</button>
+                        <label class="btn btn-sm btn-outline-success mb-0">
+                            Upload CSV
+                            <input type="file" id="csvUpload" accept=".csv" style="display:none;" onchange="uploadCsv(this)">
+                        </label>
+                        <button id="pubsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactivePubs()">Show Inactive</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- New Data Source Form -->
+                    <div id="dataSourceForm" style="display: none;" class="mb-3 p-3 border rounded">
+                        <h6 class="mb-3" id="dsFormTitle">New Data Source</h6>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-4">
+                                <label class="form-label form-label-sm">Stream Name</label>
+                                <input type="text" id="dsStreamName" class="form-control form-control-sm" placeholder="btc-price">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label form-label-sm">Display Name</label>
+                                <input type="text" id="dsName" class="form-control form-control-sm" placeholder="Bitcoin Price">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label form-label-sm">Description</label>
+                                <input type="text" id="dsDescription" class="form-control form-control-sm" placeholder="BTC/USD spot price">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6">
+                                <label class="form-label form-label-sm">URL <small class="text-muted">(leave empty for external push)</small></label>
+                                <input type="text" id="dsUrl" class="form-control form-control-sm" placeholder="https://api.example.com/price" oninput="toggleFetchFields()">
+                            </div>
+                            <div class="col-md-2" id="dsMethodGroup">
+                                <label class="form-label form-label-sm">Method</label>
+                                <select id="dsMethod" class="form-select form-select-sm">
+                                    <option value="GET">GET</option>
+                                    <option value="POST">POST</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3" id="dsCadenceGroup">
+                                <label class="form-label form-label-sm">Cadence <small class="text-muted">(optional)</small></label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" id="dsCadenceMin" class="form-control form-control-sm" value="" min="15" placeholder="—">
+                                    <span class="input-group-text">min</span>
+                                    <select id="dsCadencePreset" class="form-select form-select-sm" onchange="applyCadencePreset()">
+                                        <option value="">Presets</option>
+                                        <option value="15">15 min</option>
+                                        <option value="30">30 min</option>
+                                        <option value="60">1 hour</option>
+                                        <option value="240">4 hours</option>
+                                        <option value="1440">1 day</option>
+                                        <option value="10080">1 week</option>
+                                        <option value="43200">1 month</option>
+                                        <option value="525600">1 year</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-2" id="dsHeadersGroup">
+                                <label class="form-label form-label-sm">Headers (JSON)</label>
+                                <input type="text" id="dsHeaders" class="form-control form-control-sm" placeholder='{"Authorization": "..."}'>
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2" id="dsParserRow">
+                            <div class="col-md-3">
+                                <label class="form-label form-label-sm">Parser Type</label>
+                                <select id="dsParserType" class="form-select form-select-sm" onchange="toggleParserInput()">
+                                    <option value="json_path">JSON Path</option>
+                                    <option value="python">Python Function</option>
+                                </select>
+                            </div>
+                            <div class="col-md-9" id="dsParserJsonPathGroup">
+                                <label class="form-label form-label-sm">JSON Path</label>
+                                <input type="text" id="dsParserJsonPath" class="form-control form-control-sm" placeholder="data.price">
+                            </div>
+                            <div class="col-md-9" id="dsParserPythonGroup" style="display: none;">
+                                <label class="form-label form-label-sm">Python Function <small class="text-muted">(receives <code>text</code>, return the value)</small></label>
+                                <textarea id="dsParserPython" class="form-control form-control-sm font-monospace" rows="4" placeholder="import json&#10;data = json.loads(text)&#10;return data['price']"></textarea>
+                            </div>
+                        </div>
+                        <div id="dsExternalHint" style="display: none;" class="mb-2">
+                            <small class="text-muted">
+                                No URL — this stream accepts data via <code>POST /api/network/publish</code>
+                                with <code>{"stream_name": "...", "value": "..."}</code>
+                            </small>
+                        </div>
+                        <div class="d-flex gap-2 mb-2">
+                            <button class="btn btn-sm btn-outline-info" onclick="testDataSource(this)">Test</button>
+                            <button class="btn btn-sm btn-primary" onclick="saveDataSource(this)">Save</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="toggleDataSourceForm(false)">Cancel</button>
+                            <span id="dsError" class="text-danger small align-self-center"></span>
+                        </div>
+                        <div id="dsTestResults" style="display: none;">
+                            <div class="row g-2">
+                                <div class="col-md-8">
+                                    <label class="form-label form-label-sm">Response <small class="text-muted">(click a value to select it)</small></label>
+                                    <div id="dsTestTree" class="border rounded p-2 bg-light" style="max-height: 280px; overflow: auto; font-size: 0.8rem;"></div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label form-label-sm">Extracted Value</label>
+                                    <div id="dsTestValue" class="border rounded p-2 bg-light font-monospace" style="min-height: 40px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="pubsEmpty" class="text-center text-muted py-3">
+                        No publications yet.
+                    </div>
+                    <div id="pubsTable" style="display: none;">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Stream</th>
+                                        <th>Source</th>
+                                        <th>Cadence</th>
+                                        <th>Seq</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pubsList"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- Publication data drawer -->
+                    <div id="pubDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
+                        <div class="p-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0" id="pubDrawerTitle">Publication Data</h6>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="closePubDrawer()">Close</button>
+                            </div>
+                            <div id="pubChartContainer" style="display: none; max-height: 250px; margin-bottom: 12px;">
+                                <canvas id="pubChart"></canvas>
+                            </div>
+                            <ul class="nav nav-tabs mb-2" id="pubDrawerTabs">
+                                <li class="nav-item">
+                                    <a class="nav-link active" href="#" onclick="switchPubTab('observations', this); return false;">Observations</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="#" onclick="switchPubTab('predictions', this); return false;">Predictions</a>
+                                </li>
+                            </ul>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead id="pubDrawerHead">
+                                        <tr>
+                                            <th>Seq</th>
+                                            <th>Observed At</th>
+                                            <th>Received At</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pubDrawerBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Relays Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">rss_feed</i>
+                        Relays
+                    </h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="input-group input-group-sm" style="width: 320px;">
+                            <input type="text" id="addRelayInput" class="form-control" placeholder="wss://relay.example.com">
+                            <button class="btn btn-outline-primary" onclick="addRelay()">Add</button>
+                        </div>
+                        <span id="networkStatus" class="badge bg-secondary">Checking...</span>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="relaysLoading" class="text-center text-muted py-3">
+                        Loading relays...
+                    </div>
+                    <div id="relaysEmpty" class="text-center text-muted py-3" style="display: none;">
+                        No relays found.
+                    </div>
+                    <div id="relaysTable" style="display: none;">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Relay URL</th>
+                                        <th>Last Active</th>
+                                        <th>Source</th>
+                                        <th></th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="relaysList"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- Streams drawer -->
+                    <div id="relayDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
+                        <div class="p-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0" id="relayDrawerTitle">Streams</h6>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="closeRelayDrawer()">Close</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Stream</th>
+                                            <th>Description</th>
+                                            <th>Cadence</th>
+                                            <th>Price</th>
+                                            <th>Tags</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="relayDrawerStreams"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Engine Training Control Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"
+                     style="cursor: pointer;"
+                     data-bs-toggle="collapse"
+                     data-bs-target="#aiEngineCollapse"
+                     aria-expanded="false"
+                     aria-controls="aiEngineCollapse">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">psychology</i>
+                        AI Engine Training Frequency
+                    </h5>
+                </div>
+                <div class="collapse" id="aiEngineCollapse">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Training Frequency</label>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="text-muted small">Slow</span>
+                            <input type="range" class="form-range flex-grow-1"
+                                   id="trainingDelaySlider"
+                                   min="0" max="100" step="1" value="50"
+                                   oninput="updateTrainingDelayLabel(this.value)"
+                                   onchange="setTrainingDelay(this.value)">
+                            <span class="text-muted small">Fast</span>
+                        </div>
+                        <div class="text-center mt-2">
+                            <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
+                        </div>
+                        <small class="form-text text-muted">
+                            Controls how frequently the AI engine trains new models.
+                            Lower frequency = less CPU usage. Higher frequency = faster model improvements.
+                        </small>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Engine Performance Dashboard -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"
+                     style="cursor: pointer;"
+                     data-bs-toggle="collapse"
+                     data-bs-target="#performanceCollapse"
+                     aria-expanded="false"
+                     aria-controls="performanceCollapse">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">show_chart</i>
+                        AI Engine Performance
+                    </h5>
+                </div>
+                <div class="collapse" id="performanceCollapse">
+                <div class="card-body">
+                    <!-- Stats Summary -->
+                    <div class="row mb-4" id="performanceStats">
+                        <div class="col-md-4">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Accuracy</div>
+                                <div class="h4 mb-0" id="accuracyPct">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Avg Error</div>
+                                <div class="h5 mb-0" id="avgError">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
+                                <div class="text-muted small">Avg Abs Error</div>
+                                <div class="h5 mb-0" id="avgAbsError">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Predictions vs Observations Chart -->
+                    <div class="mb-4">
+                        <h6 class="mb-3">Predictions vs Observations</h6>
+                        <div style="position: relative; height: 300px;">
+                            <canvas id="predVsObsChart"></canvas>
+                        </div>
+                        <small class="text-muted">Last 100 data points</small>
+                    </div>
+
+                    <!-- Accuracy Over Time Chart -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Prediction Accuracy Over Time</h6>
+                        <div style="position: relative; height: 300px;">
+                            <canvas id="accuracyChart"></canvas>
+                        </div>
+                        <small class="text-muted">Absolute error between prediction and next observation</small>
+                    </div>
+
+                    <div class="text-center mt-3">
+                        <button class="btn btn-outline-primary btn-sm" onclick="refreshPerformance()">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                            Refresh Data
+                        </button>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Disclaimer Footer -->
@@ -622,6 +1088,12 @@
             if (result && !result.error) {
                 document.getElementById('tokenBalance').textContent = result.total !== undefined ? formatBalance(result.total) : '--';
                 document.getElementById('evrBalance').textContent = result.total_evr !== undefined ? formatBalance(result.total_evr) : '--';
+
+                // Show/hide no-EVR warning
+                const noEvrWarning = document.getElementById('noEvrWarning');
+                if (noEvrWarning) {
+                    noEvrWarning.style.display = (result.total_evr !== undefined && parseFloat(result.total_evr) <= 0) ? 'block' : 'none';
+                }
 
                 // Update balance labels in send section
                 if (result.vault_balance !== undefined) {
@@ -1128,6 +1600,1071 @@
             showToast('No address to copy', true);
         }
     }
+
+    // Relay Registration
+    async function registerRelay() {
+        const relayUrl = document.getElementById('relayUrl').value.trim();
+        const statusEl = document.getElementById('relayStatus');
+
+        if (!relayUrl) {
+            statusEl.style.display = 'inline';
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'Please enter a relay URL';
+            return;
+        }
+
+        if (!relayUrl.startsWith('wss://') && !relayUrl.startsWith('ws://')) {
+            statusEl.style.display = 'inline';
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'URL must start with wss:// or ws://';
+            return;
+        }
+
+        statusEl.style.display = 'inline';
+        statusEl.className = 'ms-3 text-info';
+        statusEl.textContent = 'Verifying relay...';
+
+        try {
+            const resp = await fetch('/api/relay', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({relay_url: relayUrl})
+            });
+            const data = await resp.json();
+            if (resp.ok && (data.success || data.relay_url)) {
+                statusEl.className = 'ms-3 text-success';
+                statusEl.textContent = 'Relay verified and registered';
+            } else {
+                statusEl.className = 'ms-3 text-danger';
+                statusEl.textContent = data.error || data.detail || 'Verification failed';
+            }
+        } catch (err) {
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'Connection error: ' + err.message;
+        }
+    }
+
+    // Network Datastreams & Subscriptions
+    function formatCadence(s) {
+        if (!s) return '-';
+        return s >= 3600 ? (s / 3600) + 'h' : s + 's';
+    }
+
+    function btnLoading(btn) {
+        btn.disabled = true;
+        btn._origText = btn.textContent;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+    function btnDone(btn) {
+        if (btn) { btn.disabled = false; btn.textContent = btn._origText || ''; }
+    }
+
+    async function networkSubscribe(stream, btn) {
+        if (btn) btnLoading(btn);
+        await fetch('/api/network/subscribe', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(stream)
+        });
+        loadNetworkStreams();
+        loadNetworkSubscriptions();
+    }
+
+    async function networkResubscribe(streamName, pubkey, relayUrl, btn) {
+        if (btn) btnLoading(btn);
+        await fetch('/api/network/subscribe', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({stream_name: streamName, nostr_pubkey: pubkey, relay_url: relayUrl})
+        });
+        loadNetworkSubscriptions();
+    }
+
+    async function networkUnsubscribe(streamName, pubkey, btn) {
+        if (btn) btnLoading(btn);
+        await fetch('/api/network/unsubscribe', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({stream_name: streamName, nostr_pubkey: pubkey})
+        });
+        loadNetworkStreams();
+        loadNetworkSubscriptions();
+    }
+
+    async function networkPredict(streamName, pubkey, btn) {
+        if (btn) btnLoading(btn);
+        await fetch('/api/network/predict', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({stream_name: streamName, nostr_pubkey: pubkey})
+        });
+        loadNetworkSubscriptions();
+        loadPublications();
+    }
+
+    async function networkStopPredict(streamName, btn) {
+        if (btn) btnLoading(btn);
+        await fetch('/api/network/stop-predict', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({stream_name: streamName})
+        });
+        loadNetworkSubscriptions();
+        loadPublications();
+    }
+
+    // ── Observations drawer ──────────────────────────────────
+    let obsDrawerData = {observations: [], predictions: []};
+    let obsDrawerTab = 'observations';
+    let obsChart = null;
+
+    function closeObsDrawer() {
+        document.getElementById('obsDrawer').style.display = 'none';
+        if (obsChart) { obsChart.destroy(); obsChart = null; }
+    }
+
+    function tryParseFloat(val) {
+        if (val == null) return null;
+        try {
+            const parsed = JSON.parse(val);
+            if (typeof parsed === 'number') return parsed;
+        } catch(e) {}
+        const n = parseFloat(val);
+        return isNaN(n) ? null : n;
+    }
+
+    function renderObsChart() {
+        const container = document.getElementById('obsChartContainer');
+        const ctx = document.getElementById('obsChart');
+        if (obsChart) { obsChart.destroy(); obsChart = null; }
+        // Build observation points (oldest first)
+        const obsPoints = obsDrawerData.observations
+            .slice().reverse()
+            .map(o => ({x: (o.observed_at || o.received_at) * 1000, y: tryParseFloat(o.value)}))
+            .filter(p => p.y !== null);
+        // Predictions are shifted forward: prediction made at T1 is for
+        // the next observation, so align with the next obs timestamp.
+        // The last prediction has no next obs yet — extrapolate using cadence.
+        const obsTimes = obsPoints.map(p => p.x);
+        const rawPreds = obsDrawerData.predictions
+            .slice().reverse()
+            .map(p => ({x: (p.observed_at || p.created_at) * 1000, y: tryParseFloat(p.value)}))
+            .filter(p => p.y !== null);
+        // Estimate cadence from observation spacing
+        let cadenceMs = 0;
+        if (obsTimes.length >= 2) {
+            const diffs = [];
+            for (let i = 1; i < obsTimes.length; i++) diffs.push(obsTimes[i] - obsTimes[i-1]);
+            cadenceMs = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+        }
+        const predPoints = rawPreds.map((p, i) => {
+            const obsIdx = obsTimes.findIndex(t => t >= p.x);
+            const nextIdx = obsIdx >= 0 ? obsIdx + 1 : -1;
+            if (nextIdx >= 0 && nextIdx < obsTimes.length) {
+                return {x: obsTimes[nextIdx], y: p.y};
+            }
+            // Last prediction: extrapolate one cadence into the future
+            const lastTime = obsTimes.length > 0
+                ? obsTimes[obsTimes.length - 1] : p.x;
+            return {x: lastTime + (cadenceMs || 60000), y: p.y};
+        });
+        if (obsPoints.length === 0 && predPoints.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+        const datasets = [];
+        if (obsPoints.length > 0) {
+            datasets.push({
+                label: 'Observations',
+                data: obsPoints,
+                borderColor: 'rgba(54, 162, 235, 1)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                borderWidth: 2, pointRadius: 3, tension: 0.1, fill: false,
+            });
+        }
+        if (predPoints.length > 0) {
+            datasets.push({
+                label: 'Predictions',
+                data: predPoints,
+                borderColor: 'rgba(255, 159, 64, 1)',
+                backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                borderWidth: 2, pointRadius: 3, tension: 0.1,
+                borderDash: [5, 3], fill: false,
+            });
+        }
+        obsChart = new Chart(ctx, {
+            type: 'line',
+            data: {datasets},
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {mode: 'index', intersect: false},
+                scales: {
+                    x: {type: 'time', time: {tooltipFormat: 'MMM d, HH:mm'}},
+                    y: {beginAtZero: false},
+                },
+                plugins: {legend: {position: 'top'}},
+            },
+        });
+    }
+
+    function switchObsTab(tab, link) {
+        obsDrawerTab = tab;
+        document.querySelectorAll('#obsDrawerTabs .nav-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        renderObsDrawer();
+    }
+
+    function renderObsDrawer() {
+        const head = document.getElementById('obsDrawerHead');
+        const body = document.getElementById('obsDrawerBody');
+        body.innerHTML = '';
+        if (obsDrawerTab === 'observations') {
+            head.innerHTML = '<tr><th>Seq</th><th>Observed At</th><th>Received At</th><th>Value</th></tr>';
+            obsDrawerData.observations.forEach(o => {
+                const row = document.createElement('tr');
+                let val = o.value || '';
+                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
+                if (val.length > 80) val = val.substring(0, 80) + '...';
+                row.innerHTML =
+                    '<td>' + (o.seq_num != null ? o.seq_num : '-') + '</td>' +
+                    '<td>' + (o.observed_at ? formatTimeAgo(o.observed_at) : '-') + '</td>' +
+                    '<td>' + formatTimeAgo(o.received_at) + '</td>' +
+                    '<td><code>' + val + '</code></td>';
+                body.appendChild(row);
+            });
+        } else {
+            head.innerHTML = '<tr><th>Obs Seq</th><th>Observed At</th><th>Created At</th><th>Value</th><th>Published</th></tr>';
+            obsDrawerData.predictions.forEach(p => {
+                const row = document.createElement('tr');
+                let val = p.value || '';
+                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
+                if (val.length > 80) val = val.substring(0, 80) + '...';
+                row.innerHTML =
+                    '<td>' + (p.observation_seq != null ? p.observation_seq : '-') + '</td>' +
+                    '<td>' + (p.observed_at ? formatTimeAgo(p.observed_at) : '-') + '</td>' +
+                    '<td>' + formatTimeAgo(p.created_at) + '</td>' +
+                    '<td><code>' + val + '</code></td>' +
+                    '<td>' + (p.published ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>') + '</td>';
+                body.appendChild(row);
+            });
+        }
+        if (body.children.length === 0) {
+            body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data yet.</td></tr>';
+        }
+    }
+
+    async function openObsDrawer(streamName, providerPubkey) {
+        const drawer = document.getElementById('obsDrawer');
+        const title = document.getElementById('obsDrawerTitle');
+        const body = document.getElementById('obsDrawerBody');
+        title.textContent = streamName;
+        body.innerHTML = '<tr><td colspan="4" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
+        drawer.style.display = 'block';
+        obsDrawerTab = 'observations';
+        document.querySelectorAll('#obsDrawerTabs .nav-link').forEach((l, i) =>
+            i === 0 ? l.classList.add('active') : l.classList.remove('active'));
+        try {
+            const resp = await fetch('/api/network/observations?stream_name=' +
+                encodeURIComponent(streamName) + '&provider_pubkey=' +
+                encodeURIComponent(providerPubkey));
+            obsDrawerData = await resp.json();
+            renderObsChart();
+            renderObsDrawer();
+        } catch(e) {
+            body.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Failed to load</td></tr>';
+        }
+    }
+
+    let showInactiveSubs = false;
+
+    function toggleInactiveSubs() {
+        showInactiveSubs = !showInactiveSubs;
+        const btn = document.getElementById('subsToggleInactive');
+        btn.textContent = showInactiveSubs ? 'Hide Inactive' : 'Show Inactive';
+        loadNetworkSubscriptions();
+    }
+
+    async function loadNetworkSubscriptions() {
+        try {
+            const url = showInactiveSubs
+                ? '/api/network/subscriptions?all=1'
+                : '/api/network/subscriptions';
+            const resp = await fetch(url);
+            const data = await resp.json();
+            const empty = document.getElementById('subsEmpty');
+            const table = document.getElementById('subsTable');
+            const list = document.getElementById('subsList');
+
+            if (!data.subscriptions || data.subscriptions.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+                return;
+            }
+            empty.style.display = 'none';
+            table.style.display = 'block';
+            list.innerHTML = '';
+            data.subscriptions.forEach(s => {
+                const row = document.createElement('tr');
+                const inactive = s.active === 0;
+                const stale = s.stale_since != null;
+                if (inactive) row.classList.add('text-muted');
+                else if (stale) row.classList.add('text-muted');
+                const statusBadge = inactive
+                    ? '<span class="badge bg-secondary">Inactive</span>'
+                    : stale
+                        ? '<span class="badge bg-warning text-dark">Stale</span>'
+                        : '<span class="badge bg-success">Active</span>';
+                const actionBtn = inactive
+                    ? '<button class="btn btn-sm btn-outline-success" onclick="networkResubscribe(\'' +
+                      s.stream_name.replace(/'/g, "\\'") + "', '" +
+                      s.provider_pubkey.replace(/'/g, "\\'") + "', '" +
+                      (s.relay_url || '').replace(/'/g, "\\'") + '\', this)">Resubscribe</button>'
+                    : '<button class="btn btn-sm btn-outline-danger" onclick="networkUnsubscribe(\'' +
+                      s.stream_name.replace(/'/g, "\\'") + "', '" +
+                      s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Unsubscribe</button>';
+                const predictBtn = inactive ? '' : (s.predicting
+                    ? '<button class="btn btn-sm btn-outline-warning ms-1" onclick="networkStopPredict(\'' +
+                      s.stream_name.replace(/'/g, "\\'") + '\', this)">Stop Predicting</button>'
+                    : '<button class="btn btn-sm btn-outline-info ms-1" onclick="networkPredict(\'' +
+                      s.stream_name.replace(/'/g, "\\'") + "', '" +
+                      s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Predict</button>');
+                const nameLink = '<a href="#" style="text-decoration:none" onclick="openObsDrawer(\'' +
+                    s.stream_name.replace(/'/g, "\\'") + "', '" +
+                    s.provider_pubkey.replace(/'/g, "\\'") + '\'); return false;"><strong>' +
+                    (s.name || s.stream_name) + '</strong></a>';
+                row.innerHTML =
+                    '<td>' + nameLink + '</td>' +
+                    '<td><small class="text-muted">' + (s.relay_url || '-') + '</small></td>' +
+                    '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + actionBtn + predictBtn + '</td>';
+                list.appendChild(row);
+            });
+        } catch (err) { /* ignore */ }
+    }
+
+    // ── Data Source Form ──────────────────────────────────────
+    function downloadCsvTemplate() {
+        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,parser_type,parser_config';
+        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,json_path,data.price';
+        const csv = header + '\n' + example + '\n';
+        const blob = new Blob([csv], {type: 'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'data_sources_template.csv';
+        a.click();
+    }
+
+    async function uploadCsv(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const text = await file.text();
+        input.value = '';
+        const lines = text.trim().split('\n');
+        if (lines.length < 2) { alert('CSV must have a header and at least one row'); return; }
+        const headerRow = lines[0].split(',').map(h => h.trim().toLowerCase());
+        if (!headerRow.includes('stream_name')) { alert('Missing required column: stream_name'); return; }
+        let created = 0, errors = [];
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            // Parse CSV respecting quoted fields
+            const vals = lines[i].match(/(".*?"|[^,]*)/g) || [];
+            const row = {};
+            headerRow.forEach((h, idx) => {
+                let v = (vals[idx] || '').trim();
+                if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+                row[h] = v;
+            });
+            if (!row.stream_name) {
+                errors.push('Row ' + (i+1) + ': missing stream_name');
+                continue;
+            }
+            const cadenceMin = parseInt(row.cadence_minutes) || 0;
+            const hasUrl = !!row.url;
+            if (hasUrl && cadenceMin && cadenceMin < 15) {
+                errors.push('Row ' + (i+1) + ': cadence must be at least 15 minutes');
+                continue;
+            }
+            if (hasUrl && !row.parser_config) {
+                errors.push('Row ' + (i+1) + ': parser_config required when URL is set');
+                continue;
+            }
+            try {
+                const resp = await fetch('/api/network/data-source', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        stream_name: row.stream_name,
+                        name: row.name || '',
+                        description: row.description || '',
+                        url: row.url || '',
+                        method: row.method || 'GET',
+                        headers: row.headers || null,
+                        cadence_seconds: cadenceMin ? cadenceMin * 60 : 0,
+                        parser_type: hasUrl ? (row.parser_type || 'json_path') : '',
+                        parser_config: hasUrl ? (row.parser_config || '') : '',
+                    })
+                });
+                const data = await resp.json();
+                if (data.error) errors.push('Row ' + (i+1) + ': ' + data.error);
+                else created++;
+            } catch(e) {
+                errors.push('Row ' + (i+1) + ': ' + e.message);
+            }
+        }
+        let msg = created + ' data source(s) created.';
+        if (errors.length) msg += '\n\nErrors:\n' + errors.join('\n');
+        alert(msg);
+        loadPublications();
+    }
+
+    function toggleDataSourceForm(forceShow) {
+        const form = document.getElementById('dataSourceForm');
+        if (forceShow === true) {
+            form.style.display = 'block';
+        } else if (forceShow === false) {
+            form.style.display = 'none';
+            resetDataSourceForm();
+        } else {
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+            if (form.style.display === 'none') resetDataSourceForm();
+        }
+        document.getElementById('dsError').textContent = '';
+    }
+
+    function resetDataSourceForm() {
+        document.getElementById('dsFormTitle').textContent = 'New Data Source';
+        document.getElementById('dsStreamName').readOnly = false;
+        ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython'].forEach(
+            id => document.getElementById(id).value = '');
+        document.getElementById('dsCadenceMin').value = '';
+        document.getElementById('dsMethod').value = 'GET';
+        document.getElementById('dsParserType').value = 'json_path';
+        toggleParserInput();
+        toggleFetchFields();
+        document.getElementById('dsTestResults').style.display = 'none';
+    }
+
+    async function editDataSource(streamName) {
+        try {
+            const resp = await fetch('/api/network/data-source?stream_name=' + encodeURIComponent(streamName));
+            const data = await resp.json();
+            if (data.error || !data.data_source) return false;
+            const ds = data.data_source;
+            // Populate form
+            document.getElementById('dsFormTitle').textContent = 'Edit Data Source';
+            document.getElementById('dsStreamName').value = ds.stream_name;
+            document.getElementById('dsStreamName').readOnly = true;
+            document.getElementById('dsName').value = ds.name || '';
+            document.getElementById('dsDescription').value = ds.description || '';
+            document.getElementById('dsUrl').value = ds.url || '';
+            document.getElementById('dsMethod').value = ds.method || 'GET';
+            document.getElementById('dsHeaders').value = ds.headers || '';
+            document.getElementById('dsCadenceMin').value = ds.cadence_seconds ? Math.round(ds.cadence_seconds / 60) : '';
+            document.getElementById('dsParserType').value = ds.parser_type || 'json_path';
+            toggleParserInput();
+            if (ds.parser_type === 'python') {
+                document.getElementById('dsParserPython').value = ds.parser_config || '';
+            } else {
+                document.getElementById('dsParserJsonPath').value = ds.parser_config || '';
+            }
+            toggleFetchFields();
+            document.getElementById('dsTestResults').style.display = 'none';
+            document.getElementById('dsError').textContent = '';
+            // Show form and scroll to it
+            toggleDataSourceForm(true);
+            document.getElementById('dataSourceForm').scrollIntoView({behavior: 'smooth', block: 'start'});
+            return true;
+        } catch(e) {
+            return false;
+        }
+    }
+
+    function applyCadencePreset() {
+        const preset = document.getElementById('dsCadencePreset').value;
+        if (preset) document.getElementById('dsCadenceMin').value = preset;
+        document.getElementById('dsCadencePreset').value = '';
+    }
+
+    function toggleParserInput() {
+        const type = document.getElementById('dsParserType').value;
+        document.getElementById('dsParserJsonPathGroup').style.display = type === 'json_path' ? '' : 'none';
+        document.getElementById('dsParserPythonGroup').style.display = type === 'python' ? '' : 'none';
+    }
+
+    function toggleFetchFields() {
+        const hasUrl = document.getElementById('dsUrl').value.trim() !== '';
+        document.getElementById('dsMethodGroup').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsCadenceGroup').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsHeadersGroup').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsParserRow').style.display = hasUrl ? '' : 'none';
+        document.getElementById('dsExternalHint').style.display = hasUrl ? 'none' : '';
+    }
+
+    function renderJsonTree(obj, path, container) {
+        if (obj === null || obj === undefined) {
+            const span = document.createElement('span');
+            span.className = 'text-muted';
+            span.textContent = 'null';
+            span.style.cursor = 'pointer';
+            span.onmouseover = () => span.style.backgroundColor = '#e3f2fd';
+            span.onmouseout = () => span.style.backgroundColor = '';
+            span.onclick = (e) => { e.stopPropagation(); selectJsonPath(path, String(obj)); };
+            container.appendChild(span);
+            return;
+        }
+        if (typeof obj !== 'object') {
+            const span = document.createElement('span');
+            span.style.cursor = 'pointer';
+            span.className = typeof obj === 'string' ? 'text-success' : 'text-primary';
+            span.textContent = typeof obj === 'string' ? '"' + obj + '"' : String(obj);
+            span.onmouseover = () => span.style.backgroundColor = '#e3f2fd';
+            span.onmouseout = () => span.style.backgroundColor = '';
+            span.onclick = (e) => { e.stopPropagation(); selectJsonPath(path, String(obj)); };
+            container.appendChild(span);
+            return;
+        }
+        const isArray = Array.isArray(obj);
+        const entries = isArray ? obj.map((v, i) => [String(i), v]) : Object.entries(obj);
+        const bracket = isArray ? ['[', ']'] : ['{', '}'];
+        if (entries.length === 0) {
+            container.appendChild(document.createTextNode(bracket[0] + bracket[1]));
+            return;
+        }
+        const toggle = document.createElement('span');
+        toggle.textContent = bracket[0];
+        toggle.style.cursor = 'pointer';
+        toggle.className = 'text-muted';
+        const inner = document.createElement('div');
+        inner.style.paddingLeft = '16px';
+        const close = document.createElement('span');
+        close.textContent = bracket[1];
+        close.className = 'text-muted';
+        toggle.onclick = (e) => {
+            e.stopPropagation();
+            if (inner.style.display === 'none') {
+                inner.style.display = '';
+                close.style.display = '';
+                toggle.textContent = bracket[0];
+            } else {
+                inner.style.display = 'none';
+                close.style.display = 'none';
+                toggle.textContent = bracket[0] + ' ... ' + bracket[1] + ' (' + entries.length + ')';
+            }
+        };
+        container.appendChild(toggle);
+        entries.forEach(([key, val], idx) => {
+            const line = document.createElement('div');
+            const childPath = path ? path + '.' + key : key;
+            const keySpan = document.createElement('span');
+            keySpan.className = 'fw-bold';
+            keySpan.textContent = isArray ? key + ': ' : '"' + key + '": ';
+            line.appendChild(keySpan);
+            renderJsonTree(val, childPath, line);
+            if (idx < entries.length - 1) line.appendChild(document.createTextNode(','));
+            inner.appendChild(line);
+        });
+        container.appendChild(inner);
+        container.appendChild(close);
+    }
+
+    function selectJsonPath(path, value) {
+        document.getElementById('dsParserType').value = 'json_path';
+        toggleParserInput();
+        document.getElementById('dsParserJsonPath').value = path;
+        document.getElementById('dsTestValue').innerHTML =
+            '<span class="text-success fw-bold">' + value + '</span>' +
+            '<br><small class="text-muted">Path: ' + path + '</small>';
+    }
+
+    async function testDataSource(btn) {
+        const err = document.getElementById('dsError');
+        err.textContent = '';
+        const url = document.getElementById('dsUrl').value.trim();
+        if (!url) { err.textContent = 'URL required'; return; }
+        const parserType = document.getElementById('dsParserType').value;
+        const parserConfig = parserType === 'json_path'
+            ? document.getElementById('dsParserJsonPath').value.trim()
+            : document.getElementById('dsParserPython').value.trim();
+        if (!parserConfig) { err.textContent = 'Parser config required'; return; }
+        const headers = document.getElementById('dsHeaders').value.trim() || null;
+        btnLoading(btn);
+        try {
+            const resp = await fetch('/api/network/data-source/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    url: url,
+                    method: document.getElementById('dsMethod').value,
+                    headers: headers,
+                    parser_type: parserType,
+                    parser_config: parserConfig,
+                })
+            });
+            const data = await resp.json();
+            const results = document.getElementById('dsTestResults');
+            const treeEl = document.getElementById('dsTestTree');
+            const valEl = document.getElementById('dsTestValue');
+            results.style.display = 'block';
+            treeEl.innerHTML = '';
+            // Try to render as interactive JSON tree
+            let raw = data.raw || '';
+            try {
+                const parsed = JSON.parse(raw);
+                renderJsonTree(parsed, '', treeEl);
+            } catch(e) {
+                // Not JSON — show as plain text
+                const pre = document.createElement('pre');
+                pre.style.margin = '0';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.textContent = raw;
+                treeEl.appendChild(pre);
+            }
+            if (data.error) {
+                valEl.innerHTML = '<span class="text-danger">' + data.error + '</span>';
+            } else {
+                valEl.innerHTML = '<span class="text-success fw-bold">' + data.value + '</span>';
+            }
+        } catch(e) {
+            document.getElementById('dsError').textContent = 'Test failed: ' + e.message;
+        }
+        btnDone(btn);
+    }
+
+    async function saveDataSource(btn) {
+        const err = document.getElementById('dsError');
+        err.textContent = '';
+        const streamName = document.getElementById('dsStreamName').value.trim();
+        const url = document.getElementById('dsUrl').value.trim();
+        if (!streamName) { err.textContent = 'Stream name required'; return; }
+        // URL-dependent validation
+        let cadence = 0;
+        let parserType = '';
+        let parserConfig = '';
+        const headers = document.getElementById('dsHeaders').value.trim() || null;
+        if (url) {
+            const cadenceMin = parseInt(document.getElementById('dsCadenceMin').value);
+            if (!cadenceMin || cadenceMin < 15) { err.textContent = 'Cadence must be at least 15 minutes'; return; }
+            cadence = cadenceMin * 60;
+            parserType = document.getElementById('dsParserType').value;
+            parserConfig = parserType === 'json_path'
+                ? document.getElementById('dsParserJsonPath').value.trim()
+                : document.getElementById('dsParserPython').value.trim();
+            if (!parserConfig) { err.textContent = 'Parser config required'; return; }
+            if (headers) {
+                try { JSON.parse(headers); } catch(e) { err.textContent = 'Headers must be valid JSON'; return; }
+            }
+        }
+        btnLoading(btn);
+        const resp = await fetch('/api/network/data-source', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                stream_name: streamName,
+                name: document.getElementById('dsName').value.trim(),
+                description: document.getElementById('dsDescription').value.trim(),
+                url: url,
+                method: url ? document.getElementById('dsMethod').value : 'GET',
+                headers: headers,
+                cadence_seconds: cadence,
+                parser_type: parserType,
+                parser_config: parserConfig,
+            })
+        });
+        btnDone(btn);
+        const data = await resp.json();
+        if (data.error) { err.textContent = data.error; return; }
+        toggleDataSourceForm(false);
+        loadPublications();
+    }
+
+    // ── Publications ──────────────────────────────────────────
+    let showInactivePubs = false;
+    let pubDrawerData = {observations: [], predictions: []};
+    let pubDrawerTab = 'observations';
+    let pubChart = null;
+
+    function toggleInactivePubs() {
+        showInactivePubs = !showInactivePubs;
+        const btn = document.getElementById('pubsToggleInactive');
+        btn.textContent = showInactivePubs ? 'Hide Inactive' : 'Show Inactive';
+        loadPublications();
+    }
+
+    function closePubDrawer() {
+        document.getElementById('pubDrawer').style.display = 'none';
+        if (pubChart) { pubChart.destroy(); pubChart = null; }
+    }
+
+    function switchPubTab(tab, link) {
+        pubDrawerTab = tab;
+        document.querySelectorAll('#pubDrawerTabs .nav-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        renderPubDrawerTable();
+    }
+
+    function renderPubDrawerTable() {
+        const head = document.getElementById('pubDrawerHead');
+        const body = document.getElementById('pubDrawerBody');
+        body.innerHTML = '';
+        if (pubDrawerTab === 'observations') {
+            head.innerHTML = '<tr><th>Seq</th><th>Observed At</th><th>Received At</th><th>Value</th></tr>';
+            pubDrawerData.observations.forEach(o => {
+                const row = document.createElement('tr');
+                let val = o.value || '';
+                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
+                if (val.length > 80) val = val.substring(0, 80) + '...';
+                row.innerHTML =
+                    '<td>' + (o.seq_num != null ? o.seq_num : '-') + '</td>' +
+                    '<td>' + (o.observed_at ? formatTimeAgo(o.observed_at) : '-') + '</td>' +
+                    '<td>' + formatTimeAgo(o.received_at) + '</td>' +
+                    '<td><code>' + val + '</code></td>';
+                body.appendChild(row);
+            });
+        } else {
+            head.innerHTML = '<tr><th>Obs Seq</th><th>Observed At</th><th>Created At</th><th>Value</th><th>Published</th></tr>';
+            pubDrawerData.predictions.forEach(p => {
+                const row = document.createElement('tr');
+                let val = p.value || '';
+                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
+                if (val.length > 80) val = val.substring(0, 80) + '...';
+                row.innerHTML =
+                    '<td>' + (p.observation_seq != null ? p.observation_seq : '-') + '</td>' +
+                    '<td>' + (p.observed_at ? formatTimeAgo(p.observed_at) : '-') + '</td>' +
+                    '<td>' + formatTimeAgo(p.created_at) + '</td>' +
+                    '<td><code>' + val + '</code></td>' +
+                    '<td>' + (p.published ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>') + '</td>';
+                body.appendChild(row);
+            });
+        }
+        if (body.children.length === 0) {
+            body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data yet.</td></tr>';
+        }
+    }
+
+    function renderPubChart() {
+        const container = document.getElementById('pubChartContainer');
+        const ctx = document.getElementById('pubChart');
+        if (pubChart) { pubChart.destroy(); pubChart = null; }
+        const obsPoints = pubDrawerData.observations
+            .slice().reverse()
+            .map(o => ({x: (o.observed_at || o.received_at) * 1000, y: tryParseFloat(o.value)}))
+            .filter(p => p.y !== null);
+        const obsTimes = obsPoints.map(p => p.x);
+        const rawPreds = pubDrawerData.predictions
+            .slice().reverse()
+            .map(p => ({x: (p.observed_at || p.created_at) * 1000, y: tryParseFloat(p.value)}))
+            .filter(p => p.y !== null);
+        let cadenceMs = 0;
+        if (obsTimes.length >= 2) {
+            const diffs = [];
+            for (let i = 1; i < obsTimes.length; i++) diffs.push(obsTimes[i] - obsTimes[i-1]);
+            cadenceMs = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+        }
+        const predPoints = rawPreds.map(p => {
+            const obsIdx = obsTimes.findIndex(t => t >= p.x);
+            const nextIdx = obsIdx >= 0 ? obsIdx + 1 : -1;
+            if (nextIdx >= 0 && nextIdx < obsTimes.length) {
+                return {x: obsTimes[nextIdx], y: p.y};
+            }
+            const lastTime = obsTimes.length > 0 ? obsTimes[obsTimes.length - 1] : p.x;
+            return {x: lastTime + (cadenceMs || 60000), y: p.y};
+        });
+        if (obsPoints.length === 0 && predPoints.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+        const datasets = [];
+        if (obsPoints.length > 0) {
+            datasets.push({
+                label: 'Observations',
+                data: obsPoints,
+                borderColor: 'rgba(54, 162, 235, 1)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                borderWidth: 2, pointRadius: 3, tension: 0.1, fill: false,
+            });
+        }
+        if (predPoints.length > 0) {
+            datasets.push({
+                label: 'Predictions',
+                data: predPoints,
+                borderColor: 'rgba(255, 159, 64, 1)',
+                backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                borderWidth: 2, pointRadius: 3, tension: 0.1,
+                borderDash: [5, 3], fill: false,
+            });
+        }
+        pubChart = new Chart(ctx, {
+            type: 'line',
+            data: {datasets},
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {mode: 'index', intersect: false},
+                scales: {
+                    x: {type: 'time', time: {tooltipFormat: 'MMM d, HH:mm'}},
+                    y: {beginAtZero: false},
+                },
+                plugins: {legend: {position: 'top'}},
+            },
+        });
+    }
+
+    async function openPubDrawer(pub) {
+        // If this is a data source publication (not a prediction), open edit form
+        if (!pub.source_stream_name) {
+            const opened = await editDataSource(pub.stream_name);
+            if (opened) return;
+        }
+        const drawer = document.getElementById('pubDrawer');
+        const title = document.getElementById('pubDrawerTitle');
+        const body = document.getElementById('pubDrawerBody');
+        title.textContent = pub.stream_name;
+        body.innerHTML = '<tr><td colspan="4" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
+        drawer.style.display = 'block';
+        pubDrawerTab = 'observations';
+        document.querySelectorAll('#pubDrawerTabs .nav-link').forEach((l, i) =>
+            i === 0 ? l.classList.add('active') : l.classList.remove('active'));
+        // For prediction publications, load source stream data
+        const srcStream = pub.source_stream_name;
+        const srcPubkey = pub.source_provider_pubkey;
+        if (srcStream && srcPubkey) {
+            try {
+                const resp = await fetch('/api/network/observations?stream_name=' +
+                    encodeURIComponent(srcStream) + '&provider_pubkey=' +
+                    encodeURIComponent(srcPubkey));
+                pubDrawerData = await resp.json();
+            } catch(e) {
+                pubDrawerData = {observations: [], predictions: []};
+            }
+        } else {
+            pubDrawerData = {observations: [], predictions: []};
+        }
+        renderPubChart();
+        renderPubDrawerTable();
+    }
+
+    async function loadPublications() {
+        try {
+            const url = showInactivePubs
+                ? '/api/network/publications?all=1'
+                : '/api/network/publications';
+            const resp = await fetch(url);
+            const data = await resp.json();
+            const empty = document.getElementById('pubsEmpty');
+            const table = document.getElementById('pubsTable');
+            const list = document.getElementById('pubsList');
+
+            if (!data.publications || data.publications.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+                return;
+            }
+            empty.style.display = 'none';
+            table.style.display = 'block';
+            list.innerHTML = '';
+            data.publications.forEach((p, idx) => {
+                const row = document.createElement('tr');
+                const inactive = p.active === 0;
+                if (inactive) row.classList.add('text-muted');
+                const statusBadge = inactive
+                    ? '<span class="badge bg-secondary">Inactive</span>'
+                    : '<span class="badge bg-success">Active</span>';
+                const source = p.source_stream_name
+                    ? '<small class="text-muted">' + p.source_stream_name + '</small>'
+                    : '<span class="badge bg-info">Original</span>';
+                const actionBtn = inactive
+                    ? ''
+                    : '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); stopPublication(\'' +
+                      p.stream_name.replace(/'/g, "\\'") + '\', this)">Stop</button>';
+                // Store pub data for drawer click
+                row.dataset.pubIdx = idx;
+                row.style.cursor = 'pointer';
+                row.onclick = function() { openPubDrawer(data.publications[idx]); };
+                row.innerHTML =
+                    '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
+                    '<td>' + source + '</td>' +
+                    '<td>' + formatCadence(p.cadence_seconds) + '</td>' +
+                    '<td>' + (p.last_seq_num || 0) + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td>' + actionBtn + '</td>';
+                list.appendChild(row);
+            });
+        } catch (err) { /* ignore */ }
+    }
+
+    async function stopPublication(streamName, btn) {
+        if (btn) btnLoading(btn);
+        await fetch('/api/network/stop-predict', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({stream_name: streamName.replace(/_pred$/, '')})
+        });
+        loadPublications();
+        loadNetworkSubscriptions();
+    }
+
+    let cachedStreamsByRelay = {};
+
+    function closeRelayDrawer() {
+        document.getElementById('relayDrawer').style.display = 'none';
+    }
+
+    function renderDrawerStreams(streams, relayUrl) {
+        const drawer = document.getElementById('relayDrawer');
+        const title = document.getElementById('relayDrawerTitle');
+        const list = document.getElementById('relayDrawerStreams');
+
+        title.textContent = relayUrl;
+        list.innerHTML = '';
+
+        const active = streams.filter(s => s.active);
+        if (active.length === 0) {
+            list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No active streams</td></tr>';
+        } else {
+            active.sort((a, b) => (b.subscribed ? 1 : 0) - (a.subscribed ? 1 : 0));
+            active.forEach(s => {
+                const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
+                const row = document.createElement('tr');
+                if (!s.subscribed) row.classList.add('text-muted');
+                const btnClass = s.subscribed ? 'btn-outline-danger' : 'btn-outline-success';
+                const btnText = s.subscribed ? 'Unsubscribe' : 'Subscribe';
+                const btnAction = s.subscribed
+                    ? "networkUnsubscribe('" + s.stream_name.replace(/'/g, "\\'") + "', '" + s.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
+                    : "networkSubscribe(" + JSON.stringify(s).replace(/'/g, "\\'") + ", this)";
+                row.innerHTML =
+                    '<td><strong>' + (s.name || s.stream_name) + '</strong><br><small class="text-muted">' + s.stream_name + '</small></td>' +
+                    '<td>' + (s.description || '-') + '</td>' +
+                    '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
+                    '<td>' + (s.price_per_obs > 0 ? s.price_per_obs + ' sats' : 'Free') + '</td>' +
+                    '<td>' + tags + '</td>' +
+                    '<td><button class="btn btn-sm ' + btnClass + '" onclick="' + btnAction + '">' + btnText + '</button></td>';
+                list.appendChild(row);
+            });
+        }
+        drawer.style.display = 'block';
+    }
+
+    async function openRelayDrawer(relayUrl) {
+        const cached = cachedStreamsByRelay[relayUrl];
+        if (cached && cached.length > 0) {
+            renderDrawerStreams(cached, relayUrl);
+            return;
+        }
+        // No cached data — discover this relay
+        const drawer = document.getElementById('relayDrawer');
+        const title = document.getElementById('relayDrawerTitle');
+        const list = document.getElementById('relayDrawerStreams');
+        title.textContent = relayUrl;
+        list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Discovering streams...</td></tr>';
+        drawer.style.display = 'block';
+        try {
+            const resp = await fetch('/api/network/streams/relay?url=' + encodeURIComponent(relayUrl));
+            const data = await resp.json();
+            cachedStreamsByRelay[relayUrl] = data.streams || [];
+            renderDrawerStreams(cachedStreamsByRelay[relayUrl], relayUrl);
+        } catch (err) {
+            list.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Discovery failed</td></tr>';
+        }
+    }
+
+    function formatTimeAgo(ts) {
+        if (!ts) return '-';
+        const seconds = Math.floor(Date.now() / 1000) - ts;
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        return Math.floor(seconds / 86400) + 'd ago';
+    }
+
+    async function addRelay() {
+        const input = document.getElementById('addRelayInput');
+        const url = input.value.trim();
+        if (!url) return;
+        if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
+            input.classList.add('is-invalid');
+            return;
+        }
+        input.classList.remove('is-invalid');
+        input.disabled = true;
+        await fetch('/api/network/relay', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({relay_url: url})
+        });
+        input.value = '';
+        input.disabled = false;
+        loadRelays();
+    }
+
+    async function deleteRelay(relayUrl) {
+        await fetch('/api/network/relay', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({relay_url: relayUrl})
+        });
+        closeRelayDrawer();
+        loadRelays();
+    }
+
+    async function loadRelays() {
+        try {
+            const resp = await fetch('/api/network/relays');
+            const data = await resp.json();
+
+            const loading = document.getElementById('relaysLoading');
+            const empty = document.getElementById('relaysEmpty');
+            const table = document.getElementById('relaysTable');
+            const list = document.getElementById('relaysList');
+            const status = document.getElementById('networkStatus');
+
+            loading.style.display = 'none';
+            status.className = 'badge bg-success';
+            status.textContent = (data.relays || []).length + ' relays';
+
+            const relays = data.relays || [];
+            if (relays.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+                return;
+            }
+
+            empty.style.display = 'none';
+            table.style.display = 'block';
+            list.innerHTML = '';
+
+            relays.forEach(r => {
+                const row = document.createElement('tr');
+                row.style.cursor = 'pointer';
+                row.onclick = function() { openRelayDrawer(r.relay_url); };
+                const sourceBadge = r.source === 'both'
+                    ? '<span class="badge bg-info">server + local</span>'
+                    : r.source === 'server'
+                        ? '<span class="badge bg-secondary">server</span>'
+                        : '<span class="badge bg-outline-secondary border">local</span>';
+                const deleteBtn = r.source !== 'server'
+                    ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
+                    : '';
+                row.innerHTML =
+                    '<td>' + r.relay_url + '</td>' +
+                    '<td>' + formatTimeAgo(r.last_active) + '</td>' +
+                    '<td>' + sourceBadge + '</td>' +
+                    '<td>' + deleteBtn + '</td>' +
+                    '<td><i class="material-icons align-middle" style="font-size: 18px;">chevron_right</i></td>';
+                list.appendChild(row);
+            });
+        } catch (err) {
+            document.getElementById('relaysLoading').textContent = 'Error loading relays';
+            document.getElementById('networkStatus').className = 'badge bg-danger';
+            document.getElementById('networkStatus').textContent = 'Error';
+        }
+    }
+    loadRelays();
+    loadNetworkSubscriptions();
+    loadPublications();
 
     // Wallet Card Functions
     let privateKeyLoaded = false;
