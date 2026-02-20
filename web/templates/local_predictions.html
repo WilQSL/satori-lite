@@ -246,6 +246,12 @@
     <div class="row g-4" id="localPredictionsLayoutRow">
         <div class="col-12 dashboard-widget-col" data-widget-id="lp_filters">
             <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Filters</h6>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
                 <div class="card-body">
                     <div class="row g-3 align-items-end">
                         <div class="col-12 col-lg-5">
@@ -300,24 +306,44 @@
 
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_obs">
             <div class="card h-100"><div class="card-body">
+                <div class="d-flex justify-content-end mb-1">
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
                 <div class="metric-value" id="obsCount">0</div>
                 <div class="metric-label">Observations</div>
             </div></div>
         </div>
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_pred">
             <div class="card h-100"><div class="card-body">
+                <div class="d-flex justify-content-end mb-1">
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
                 <div class="metric-value" id="predCount">0</div>
                 <div class="metric-label">Predictions</div>
             </div></div>
         </div>
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_avgerr">
             <div class="card h-100"><div class="card-body">
+                <div class="d-flex justify-content-end mb-1">
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
                 <div class="metric-value" id="avgAbsError">-</div>
                 <div class="metric-label">Avg absolute error</div>
             </div></div>
         </div>
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_acc">
             <div class="card h-100"><div class="card-body">
+                <div class="d-flex justify-content-end mb-1">
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
                 <div class="metric-value" id="accuracyPct">-</div>
                 <div class="metric-label">Accuracy</div>
             </div></div>
@@ -325,8 +351,11 @@
 
         <div class="col-12 col-xl-6 dashboard-widget-col" data-widget-id="lp_chart_pred">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">Observations vs predictions</h6>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
                 </div>
                 <div class="card-body">
                     <div class="chart-wrap">
@@ -338,8 +367,11 @@
 
         <div class="col-12 col-xl-6 dashboard-widget-col" data-widget-id="lp_chart_err">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">Prediction error (absolute)</h6>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
                 </div>
                 <div class="card-body">
                     <div class="chart-wrap">
@@ -353,10 +385,15 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0">Recent local predictions</h6>
-                    <button class="btn btn-outline-secondary btn-sm" id="exportCsvBtn">
-                        <i class="material-icons align-middle me-1" style="font-size: 16px;">download</i>
-                        Export CSV
-                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-outline-secondary btn-sm" id="exportCsvBtn">
+                            <i class="material-icons align-middle me-1" style="font-size: 16px;">download</i>
+                            Export CSV
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body table-responsive" style="max-height: 360px;">
                     <table class="table table-sm table-hover mb-0 analytics-table">
@@ -502,6 +539,7 @@ function initLocalPredictionsDragDrop() {
         animation: 180,
         easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
         draggable: '.dashboard-widget-col',
+        handle: '.card-header, .drag-handle',
         ghostClass: 'dragging',
         chosenClass: 'drop-target',
         filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
