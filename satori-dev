@@ -12,8 +12,8 @@ if [ "$1" = "local" ] || [ "$2" = "local" ]; then
     API_URL="http://host.docker.internal:8000"
     echo "Using LOCAL central-lite at $CENTRAL_URL"
 else
-    CENTRAL_URL="http://137.184.38.13:8000"
-    API_URL="http://137.184.38.13:8000"
+    CENTRAL_URL="https://network.satorinet.io"
+    API_URL="https://network.satorinet.io"
     echo "Using REMOTE central-lite at $CENTRAL_URL"
 fi
 
