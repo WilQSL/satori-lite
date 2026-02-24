@@ -34,6 +34,8 @@ class EngineSqliteDatabase:
             self.cursor.execute('PRAGMA foreign_keys = ON;')
             self.cursor.execute('PRAGMA journal_mode = WAL;')
             self.cursor.execute('PRAGMA wal_autocheckpoint = 100;')
+            # Ensure metadata table exists even on a brand new engine.db.
+            self.createStreamsTable()
             info(f"Engine DB: Connected to {self.dbname}", color='green')
         except Exception as e:
             error(f"Engine DB: Connection error: {e}")
@@ -439,6 +441,8 @@ class EngineSqliteDatabase:
             List of dicts with stream info
         """
         try:
+            # Defensive init for older databases created before metadata table bootstrap.
+            self.createStreamsTable()
             self.cursor.execute(
                 '''SELECT id, server_stream_id, uuid, name, author, secondary, target, meta, description, last_synced, created_at
                 FROM streams ORDER BY created_at DESC''')

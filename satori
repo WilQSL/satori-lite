@@ -61,12 +61,19 @@ create_container() {
         SATORI_ENV="dev"
     fi
 
+    # Optional override for forcing environment mode (e.g. prod while using local image).
+    if [ -n "${SATORI_FORCE_ENV:-}" ]; then
+        SATORI_ENV="${SATORI_FORCE_ENV}"
+    fi
+
     # Production mode: mount data only
     docker run -d --name $CONTAINER_NAME \
         --restart unless-stopped \
         -p ${PORT}:${PORT} \
         -e SATORI_ENV=${SATORI_ENV} \
         -e SATORI_UI_PORT=${PORT} \
+        ${SATORI_CENTRAL_URL:+-e SATORI_CENTRAL_URL=${SATORI_CENTRAL_URL}} \
+        ${SATORI_API_URL:+-e SATORI_API_URL=${SATORI_API_URL}} \
         -v "${DATA_DIR}/config:/Satori/Neuron/config" \
         -v "${DATA_DIR}/wallet:/Satori/Neuron/wallet" \
         -v "${DATA_DIR}/models:/Satori/models" \
@@ -85,6 +92,11 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo ""
     echo "Modes:"
     echo "  local       Use local Docker image (SATORI_ENV=dev, no pull)"
+    echo ""
+    echo "Environment overrides:"
+    echo "  SATORI_FORCE_ENV   Force container SATORI_ENV (e.g. prod)"
+    echo "  SATORI_CENTRAL_URL Override central URL"
+    echo "  SATORI_API_URL     Alias override for central URL"
     echo ""
     echo "Instance:"
     echo "  (number)    Instance number (default: 1)"
