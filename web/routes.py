@@ -574,7 +574,38 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not get nostr/relay info: {e}")
 
-        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address, nostr_pubkey=nostr_pubkey, relay_url=relay_url)
+        return render_template(
+            'dashboard.html',
+            version=VERSION,
+            eth_wallet_address=eth_wallet_address,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
+            page_mode='dashboard')
+
+    @app.route('/p2p')
+    @login_required
+    def p2p_page():
+        """P2P page."""
+        from satorineuron import VERSION
+
+        nostr_pubkey = None
+        relay_url = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+            if startup and hasattr(startup, 'server') and startup.server:
+                relay_url = getattr(startup.server, 'relayUrl', None)
+        except Exception as e:
+            logger.warning(f"Could not get nostr/relay info: {e}")
+
+        return render_template(
+            'dashboard.html',
+            version=VERSION,
+            eth_wallet_address=None,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
+            page_mode='p2p')
 
     @app.route('/stake')
     @login_required

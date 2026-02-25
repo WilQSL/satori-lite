@@ -1,6 +1,22 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - Dashboard{% endblock %}
+{% block title %}Satori - {{ 'P2P' if page_mode == 'p2p' else 'Dashboard' }}{% endblock %}
+{% block extra_css %}
+{% if page_mode == 'dashboard' %}
+<style>
+    #p2p,
+    #p2pLayoutRow {
+        display: none !important;
+    }
+</style>
+{% elif page_mode == 'p2p' %}
+<style>
+    #dashboardLayoutRow {
+        display: none !important;
+    }
+</style>
+{% endif %}
+{% endblock %}
 
 {% block content %}
 {% include 'partials/navbar.html' %}
@@ -350,15 +366,27 @@
 
     </div>
 
-    <!-- Relay Settings Section -->
-    <div class="row g-4 mt-2">
+    <div id="p2p" class="row g-4 mt-2">
         <div class="col-12">
+            <div class="d-flex align-items-center gap-2">
+                <i class="material-icons align-middle">hub</i>
+                <h4 class="mb-0">P2P</h4>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mt-2" id="p2pLayoutRow">
+        <!-- Relay Settings Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="relay-settings" draggable="true">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">cell_tower</i>
                         Relay Settings
                     </h5>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
@@ -391,18 +419,21 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Active Subscriptions Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
+        <!-- Active Subscriptions Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="subscriptions" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">playlist_add_check</i>
                         Subscriptions
                     </h5>
-                    <button id="subsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactiveSubs()">Show Inactive</button>
+                    <div class="d-flex align-items-center gap-2">
+                        <button id="subsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactiveSubs()">Show Inactive</button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="subsEmpty" class="text-center text-muted py-3">
@@ -460,25 +491,28 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Publications Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
+        <!-- Publications Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="publications" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">publish</i>
                         Publications
                     </h5>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-primary" onclick="resetDataSourceForm(); toggleDataSourceForm()">New Data Source</button>
-                        <button class="btn btn-sm btn-outline-success" onclick="downloadCsvTemplate()">CSV Template</button>
-                        <label class="btn btn-sm btn-outline-success mb-0">
-                            Upload CSV
-                            <input type="file" id="csvUpload" accept=".csv" style="display:none;" onchange="uploadCsv(this)">
-                        </label>
-                        <button id="pubsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactivePubs()">Show Inactive</button>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="resetDataSourceForm(); toggleDataSourceForm()">New Data Source</button>
+                            <button class="btn btn-sm btn-outline-success" onclick="downloadCsvTemplate()">CSV Template</button>
+                            <label class="btn btn-sm btn-outline-success mb-0">
+                                Upload CSV
+                                <input type="file" id="csvUpload" accept=".csv" style="display:none;" onchange="uploadCsv(this)">
+                            </label>
+                            <button id="pubsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactivePubs()">Show Inactive</button>
+                        </div>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
                     </div>
                 </div>
                 <div class="card-body">
@@ -554,7 +588,7 @@
                         <div id="dsExternalHint" style="display: none;" class="mb-2">
                             <small class="text-muted">
                                 No URL — this stream accepts data via <code>POST /api/network/publish</code>
-                                with <code>{"stream_name": "...", "value": "..."}</code>
+                                with <code>{\"stream_name\": \"...\", \"value\": \"...\"}</code>
                             </small>
                         </div>
                         <div class="d-flex gap-2 mb-2">
@@ -632,11 +666,9 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Relays Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
+        <!-- Relays Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="relays" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
@@ -649,6 +681,9 @@
                             <button class="btn btn-outline-primary" onclick="addRelay()">Add</button>
                         </div>
                         <span id="networkStatus" class="badge bg-secondary">Checking...</span>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
                     </div>
                 </div>
                 <div class="card-body p-0">
@@ -703,116 +738,6 @@
         </div>
     </div>
 
-    <!-- AI Engine Training Control Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header"
-                     style="cursor: pointer;"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#aiEngineCollapse"
-                     aria-expanded="false"
-                     aria-controls="aiEngineCollapse">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">psychology</i>
-                        AI Engine Training Frequency
-                    </h5>
-                </div>
-                <div class="collapse" id="aiEngineCollapse">
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Training Frequency</label>
-                        <div class="d-flex align-items-center gap-3">
-                            <span class="text-muted small">Slow</span>
-                            <input type="range" class="form-range flex-grow-1"
-                                   id="trainingDelaySlider"
-                                   min="0" max="100" step="1" value="50"
-                                   oninput="updateTrainingDelayLabel(this.value)"
-                                   onchange="setTrainingDelay(this.value)">
-                            <span class="text-muted small">Fast</span>
-                        </div>
-                        <div class="text-center mt-2">
-                            <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
-                        </div>
-                        <small class="form-text text-muted">
-                            Controls how frequently the AI engine trains new models.
-                            Lower frequency = less CPU usage. Higher frequency = faster model improvements.
-                        </small>
-                    </div>
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- AI Engine Performance Dashboard -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header"
-                     style="cursor: pointer;"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#performanceCollapse"
-                     aria-expanded="false"
-                     aria-controls="performanceCollapse">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">show_chart</i>
-                        AI Engine Performance
-                    </h5>
-                </div>
-                <div class="collapse" id="performanceCollapse">
-                <div class="card-body">
-                    <!-- Stats Summary -->
-                    <div class="row mb-4" id="performanceStats">
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Accuracy</div>
-                                <div class="h4 mb-0" id="accuracyPct">--</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Avg Error</div>
-                                <div class="h5 mb-0" id="avgError">--</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Avg Abs Error</div>
-                                <div class="h5 mb-0" id="avgAbsError">--</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Predictions vs Observations Chart -->
-                    <div class="mb-4">
-                        <h6 class="mb-3">Predictions vs Observations</h6>
-                        <div style="position: relative; height: 300px;">
-                            <canvas id="predVsObsChart"></canvas>
-                        </div>
-                        <small class="text-muted">Last 100 data points</small>
-                    </div>
-
-                    <!-- Accuracy Over Time Chart -->
-                    <div class="mb-3">
-                        <h6 class="mb-3">Prediction Accuracy Over Time</h6>
-                        <div style="position: relative; height: 300px;">
-                            <canvas id="accuracyChart"></canvas>
-                        </div>
-                        <small class="text-muted">Absolute error between prediction and next observation</small>
-                    </div>
-
-                    <div class="text-center mt-3">
-                        <button class="btn btn-outline-primary btn-sm" onclick="refreshPerformance()">
-                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                            Refresh Data
-                        </button>
-                    </div>
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- Disclaimer Footer -->
@@ -889,6 +814,7 @@
 {% block extra_js %}
 <script>
     const API_URL = '/api';
+    const pageMode = '{{ page_mode|default("dashboard") }}';
 
     // Helper function to format balance values (removes trailing zeros)
     function formatBalance(value) {
@@ -2683,10 +2609,6 @@
             document.getElementById('networkStatus').textContent = 'Error';
         }
     }
-    loadRelays();
-    loadNetworkSubscriptions();
-    loadPublications();
-
     // Wallet Card Functions
     let privateKeyLoaded = false;
 
@@ -3264,6 +3186,7 @@
     const systemStatsHistory = [];
     let systemStatsTimer = null;
     const dashboardLayoutStorageKey = 'satori-dashboard-layout-v1';
+    const p2pLayoutStorageKey = 'satori-p2p-layout-v1';
 
     function openImportWalletModal() {
         const modal = new bootstrap.Modal(document.getElementById('importWalletModal'));
@@ -3484,6 +3407,66 @@
         });
     }
 
+    function saveP2pLayout() {
+        const row = document.getElementById('p2pLayoutRow');
+        if (!row) return;
+        const order = Array.from(row.querySelectorAll('.p2p-widget-col'))
+            .map((el) => el.dataset.widgetId)
+            .filter(Boolean);
+        localStorage.setItem(p2pLayoutStorageKey, JSON.stringify(order));
+    }
+
+    function applySavedP2pLayout() {
+        const row = document.getElementById('p2pLayoutRow');
+        if (!row) return;
+        const raw = localStorage.getItem(p2pLayoutStorageKey);
+        if (!raw) return;
+
+        let saved = null;
+        try {
+            saved = JSON.parse(raw);
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(saved) || saved.length === 0) return;
+
+        const widgetMap = new Map(
+            Array.from(row.querySelectorAll('.p2p-widget-col'))
+                .map((el) => [el.dataset.widgetId, el])
+        );
+
+        saved.forEach((widgetId) => {
+            const el = widgetMap.get(widgetId);
+            if (el) row.appendChild(el);
+        });
+
+        widgetMap.forEach((el) => {
+            if (!saved.includes(el.dataset.widgetId)) {
+                row.appendChild(el);
+            }
+        });
+    }
+
+    function initP2pDragDrop() {
+        const row = document.getElementById('p2pLayoutRow');
+        if (!row || typeof Sortable === 'undefined') return;
+
+        Sortable.create(row, {
+            animation: 180,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            draggable: '.p2p-widget-col',
+            handle: '.card-header, .drag-handle',
+            ghostClass: 'dragging',
+            chosenClass: 'drop-target',
+            forceFallback: false,
+            filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
+            preventOnFilter: false,
+            onEnd: () => {
+                saveP2pLayout();
+            },
+        });
+    }
+
     function formatDuration(seconds) {
         if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return '--';
         const total = Math.max(0, Math.floor(Number(seconds)));
@@ -3631,8 +3614,16 @@
 
     // Initialize dashboard
     document.addEventListener('DOMContentLoaded', function() {
-        applySavedDashboardLayout();
-        initDashboardDragDrop();
+        if (pageMode === 'p2p') {
+            applySavedP2pLayout();
+            initP2pDragDrop();
+            loadRelays();
+            loadNetworkSubscriptions();
+            loadPublications();
+        } else {
+            applySavedDashboardLayout();
+            initDashboardDragDrop();
+        }
 
         // Set up wallet import file input handler for modal
         const walletFolderInputModal = document.getElementById('walletFolderInputModal');
@@ -3663,21 +3654,26 @@
             poolManagementCollapse.classList.remove('show');
         }
 
-        // Health check disabled to reduce API load
-        // checkHealth();
-        loadWalletAddresses();
-        loadAllBalances();  // Load both stake and live balances from ElectrumX
-        loadRewardAddress();
-        // Staking/pool API calls moved to dedicated Stake Management page
-        // loadStakingStatus();
-        // loadWorkers();
-        // loadLenders();
-        // loadAvailablePools();
-        // loadPoolCommission();
-        loadTrainingDelay();  // Load AI engine training frequency setting
-        initSystemStatsCharts();
-        loadSystemStats();
-        systemStatsTimer = setInterval(loadSystemStats, 3000);
+        if (pageMode !== 'p2p') {
+            // Health check disabled to reduce API load
+            // checkHealth();
+            loadWalletAddresses();
+            loadAllBalances();  // Load both stake and live balances from ElectrumX
+            loadRewardAddress();
+            // Staking/pool API calls moved to dedicated Stake Management page
+            // loadStakingStatus();
+            // loadWorkers();
+            // loadLenders();
+            // loadAvailablePools();
+            // loadPoolCommission();
+            const trainingDelaySlider = document.getElementById('trainingDelaySlider');
+            if (trainingDelaySlider) {
+                loadTrainingDelay();  // Load AI engine training frequency setting
+            }
+            initSystemStatsCharts();
+            loadSystemStats();
+            systemStatsTimer = setInterval(loadSystemStats, 3000);
+        }
 
         // Periodic health check - Disabled to reduce unnecessary load
         // setInterval(checkHealth, 30000);

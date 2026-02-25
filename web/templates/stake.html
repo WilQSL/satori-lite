@@ -280,7 +280,10 @@
 
     function updateTrainingDelayLabel(sliderValue) {
         const seconds = sliderToSeconds(sliderValue);
-        document.getElementById('trainingDelayLabel').textContent = formatDelay(seconds);
+        const label = document.getElementById('trainingDelayLabel');
+        if (label) {
+            label.textContent = formatDelay(seconds);
+        }
     }
 
     async function setTrainingDelay(sliderValue) {
@@ -292,10 +295,12 @@
     }
 
     async function loadTrainingDelay() {
+        const slider = document.getElementById('trainingDelaySlider');
+        if (!slider) return;
         const result = await apiCall('/engine/training-delay');
         if (result && result.delay_seconds !== undefined) {
             const sliderValue = secondsToSlider(result.delay_seconds);
-            document.getElementById('trainingDelaySlider').value = sliderValue;
+            slider.value = sliderValue;
             updateTrainingDelayLabel(sliderValue);
         }
     }
@@ -638,7 +643,9 @@
         loadLenders();
         loadAvailablePools();
         loadPoolCommission();
-        loadTrainingDelay();
+        if (document.getElementById('trainingDelaySlider')) {
+            loadTrainingDelay();
+        }
     });
 </script>
 {% endblock %}
