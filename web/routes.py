@@ -7,6 +7,7 @@ Handles all web routes for the minimal UI:
 - API proxy endpoints
 """
 from functools import wraps
+import os
 import time
 import logging
 import base64
@@ -19,6 +20,33 @@ import uuid
 from threading import Lock
 from cryptography.fernet import Fernet
 from satorilib.config import get_api_url
+
+MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+
+
+def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
+    """Call Mundo's request endpoint to get fee data for a partial transaction."""
+    resp = requests.get(
+        f'{MUNDO_URL}/simple_partial/request/{network}',
+        params={'inputCount': inputCount, 'outputCount': outputCount},
+        timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _mundoBroadcastSimplePartial(
+    tx, reportedFeeSats: int, feeSatsReserved: int, network: str,
+) -> str:
+    """Call Mundo's broadcast endpoint with signOnly=true, returns signed tx hex."""
+    txData = tx if isinstance(tx, str) else tx.hex()
+    resp = requests.post(
+        f'{MUNDO_URL}/simple_partial/broadcast/{network}/{feeSatsReserved}/{reportedFeeSats}/0',
+        params={'signOnly': 'true'},
+        data=txData,
+        headers={'Content-Type': 'text/plain'},
+        timeout=30)
+    resp.raise_for_status()
+    return resp.text
 from flask import (
     render_template,
     redirect,
@@ -534,7 +562,19 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not derive eth_wallet_address: {e}")
 
-        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address)
+        # Get nostr pubkey and relay URL from startup instance
+        nostr_pubkey = None
+        relay_url = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+            if startup and hasattr(startup, 'server') and startup.server:
+                relay_url = getattr(startup.server, 'relayUrl', None)
+        except Exception as e:
+            logger.warning(f"Could not get nostr/relay info: {e}")
+
+        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address, nostr_pubkey=nostr_pubkey, relay_url=relay_url)
 
     @app.route('/stake')
     @login_required
@@ -1041,21 +1081,23 @@ def register_routes(app):
             wallet.get()
             wallet.getReadyToSend()
 
-            if sweep:
-                # Send all tokens - returns string (txid)
-                txid = wallet.sendAllTransaction(address)
-                if txid and len(txid) == 64:
-                    return jsonify({'success': True, 'txid': txid})
-                else:
-                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
-            else:
-                # Send specific amount - use satoriTransaction for wallet (like CLI does)
-                txid = wallet.satoriTransaction(amount=amount, address=address)
+            # typicalNeuronTransaction handles both direct (has EVR) and
+            # indirect (no EVR, uses Mundo) paths, including sweep
+            result = wallet.typicalNeuronTransaction(
+                amount=amount if not sweep else 0,
+                address=address,
+                sweep=sweep,
+                requestSimplePartialFn=_mundoRequestSimplePartial,
+                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
 
-                if txid and len(txid) == 64:
-                    return jsonify({'success': True, 'txid': txid})
+            if hasattr(result, 'success') and hasattr(result, 'msg'):
+                if result.success and result.msg and len(result.msg) == 64:
+                    return jsonify({'success': True, 'txid': result.msg})
                 else:
-                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
+                    error_msg = result.msg or 'Transaction failed'
+                    return jsonify({'error': error_msg}), 500
+            else:
+                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -1093,29 +1135,23 @@ def register_routes(app):
             vault.get()
             vault.getReadyToSend()
 
-            if sweep:
-                # Send all tokens - returns string (txid)
-                txid = vault.sendAllTransaction(address)
-                if txid and len(txid) == 64:
-                    return jsonify({'success': True, 'txid': txid})
-                else:
-                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
-            else:
-                # Send specific amount - returns TransactionResult object
-                result = vault.typicalNeuronTransaction(
-                    amount=amount,
-                    address=address)
+            # typicalNeuronTransaction handles both direct (has EVR) and
+            # indirect (no EVR, uses Mundo) paths, including sweep
+            result = vault.typicalNeuronTransaction(
+                amount=amount if not sweep else 0,
+                address=address,
+                sweep=sweep,
+                requestSimplePartialFn=_mundoRequestSimplePartial,
+                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
 
-                # Check if result is a TransactionResult object
-                if hasattr(result, 'success') and hasattr(result, 'msg'):
-                    if result.success and result.msg and len(result.msg) == 64:
-                        return jsonify({'success': True, 'txid': result.msg})
-                    else:
-                        error_msg = result.msg or 'Transaction failed'
-                        return jsonify({'error': error_msg}), 500
-                # Fallback for unexpected return type
+            if hasattr(result, 'success') and hasattr(result, 'msg'):
+                if result.success and result.msg and len(result.msg) == 64:
+                    return jsonify({'success': True, 'txid': result.msg})
                 else:
-                    return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
+                    error_msg = result.msg or 'Transaction failed'
+                    return jsonify({'error': error_msg}), 500
+            else:
+                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -1996,3 +2032,382 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"Wallet download error: {e}")
             return jsonify({'error': str(e)}), 500
+    @app.route('/api/relay', methods=['POST'])
+    @login_required
+    def api_relay_register():
+        """Register relay URL with central server for NIP-11 verification."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'server') or not startup.server:
+            return jsonify({'error': 'Server connection not initialized'}), 503
+
+        data = request.get_json()
+        if not data or 'relay_url' not in data:
+            return jsonify({'error': 'Missing relay_url'}), 400
+
+        relay_url = data['relay_url'].strip()
+        if not relay_url.startswith(('wss://', 'ws://')):
+            return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
+
+        try:
+            result = startup.server.registerRelay(relay_url)
+            if isinstance(result, requests.Response):
+                if result.status_code == 200:
+                    return jsonify(result.json())
+                else:
+                    return jsonify({'error': result.text}), result.status_code
+            return jsonify({'success': True, 'relay_url': relay_url})
+        except Exception as e:
+            logger.error(f"Relay registration error: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/network/streams', methods=['GET'])
+    @login_required
+    def api_network_streams():
+        """Return cached discovered streams (no global discovery trigger)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        connected = len(startup._networkClients) > 0
+        streams = []
+        for s in startup.networkStreams:
+            s_copy = dict(s)
+            s_copy['subscribed'] = startup.networkDB.is_subscribed(
+                s['stream_name'], s['nostr_pubkey'])
+            streams.append(s_copy)
+        return jsonify({
+            'connected': connected,
+            'streams': streams,
+        })
+
+    @app.route('/api/network/streams/relay', methods=['GET'])
+    @login_required
+    def api_network_streams_relay():
+        """Discover streams on a single relay."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        relay_url = request.args.get('url')
+        if not relay_url:
+            return jsonify({'error': 'Missing url parameter'}), 400
+        streams = startup.discoverRelaySync(relay_url)
+        for s in streams:
+            s['subscribed'] = startup.networkDB.is_subscribed(
+                s['stream_name'], s['nostr_pubkey'])
+        return jsonify({'streams': streams})
+
+    @app.route('/api/network/subscribe', methods=['POST'])
+    @login_required
+    def api_network_subscribe():
+        """Subscribe to a datastream."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
+            return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        relay_url = data.get('relay_url', '')
+        startup.networkDB.subscribe(data, relay_url)
+        return jsonify({'success': True})
+
+    @app.route('/api/network/unsubscribe', methods=['POST'])
+    @login_required
+    def api_network_unsubscribe():
+        """Unsubscribe from a datastream (soft delete)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
+            return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
+        return jsonify({'success': True})
+
+    @app.route('/api/network/predict', methods=['POST'])
+    @login_required
+    def api_network_predict():
+        """Start predicting a subscribed stream."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
+            return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        stream_name = data['stream_name']
+        provider_pubkey = data['nostr_pubkey']
+        # Look up the subscription for metadata
+        subs = startup.networkDB.get_active()
+        sub = next((s for s in subs
+                     if s['stream_name'] == stream_name
+                     and s['provider_pubkey'] == provider_pubkey), None)
+        pred_name = stream_name + '_pred'
+        startup.networkDB.add_publication(
+            stream_name=pred_name,
+            name=f"Predictions for {sub.get('name') or stream_name}" if sub else f"Predictions for {stream_name}",
+            cadence_seconds=sub.get('cadence_seconds') if sub else None,
+            source_stream_name=stream_name,
+            source_provider_pubkey=provider_pubkey)
+        return jsonify({'success': True, 'publication': pred_name})
+
+    @app.route('/api/network/stop-predict', methods=['POST'])
+    @login_required
+    def api_network_stop_predict():
+        """Stop predicting a subscribed stream."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data:
+            return jsonify({'error': 'Missing stream_name'}), 400
+        pred_name = data['stream_name'] + '_pred'
+        startup.networkDB.remove_publication(pred_name)
+        return jsonify({'success': True})
+
+    @app.route('/api/network/subscriptions', methods=['GET'])
+    @login_required
+    def api_network_subscriptions():
+        """Return subscriptions. Pass ?all=1 to include inactive."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        if request.args.get('all'):
+            subs = startup.networkDB.get_all()
+        else:
+            subs = startup.networkDB.get_active()
+        # Annotate each subscription with prediction status
+        for sub in subs:
+            sub['predicting'] = startup.networkDB.is_predicting(
+                sub['stream_name'], sub['provider_pubkey'])
+        return jsonify({'subscriptions': subs})
+
+    @app.route('/api/network/observations', methods=['GET'])
+    @login_required
+    def api_network_observations():
+        """Return recent observations and predictions for a stream."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        stream_name = request.args.get('stream_name')
+        provider_pubkey = request.args.get('provider_pubkey')
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'Missing stream_name or provider_pubkey'}), 400
+        limit = int(request.args.get('limit', 50))
+        observations = startup.networkDB.get_observations(
+            stream_name, provider_pubkey, limit=limit)
+        predictions = startup.networkDB.get_predictions(
+            stream_name, provider_pubkey, limit=limit)
+        return jsonify({
+            'observations': observations,
+            'predictions': predictions,
+        })
+
+    @app.route('/api/network/publications', methods=['GET'])
+    @login_required
+    def api_network_publications():
+        """Return publications. Pass ?all=1 to include inactive."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        if request.args.get('all'):
+            pubs = startup.networkDB.get_all_publications()
+        else:
+            pubs = startup.networkDB.get_active_publications()
+        return jsonify({'publications': pubs})
+
+    @app.route('/api/network/data-source/test', methods=['POST'])
+    @login_required
+    def api_network_data_source_test():
+        """Test a data source: fetch URL and run parser."""
+        import requests as http_requests
+        import json as json_mod
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        method = data.get('method', 'GET').upper()
+        headers = None
+        if data.get('headers'):
+            try:
+                headers = json_mod.loads(data['headers'])
+            except Exception:
+                return jsonify({'error': 'Invalid headers JSON', 'raw': ''})
+        parser_type = data.get('parser_type', 'json_path')
+        parser_config = data.get('parser_config', '')
+        # Fetch
+        try:
+            if method == 'POST':
+                resp = http_requests.post(url, headers=headers, timeout=15)
+            else:
+                resp = http_requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            raw = resp.text
+        except Exception as e:
+            return jsonify({'error': f'Fetch failed: {e}', 'raw': ''})
+        # Parse
+        try:
+            if parser_type == 'json_path':
+                obj = json_mod.loads(raw)
+                for key in parser_config.split('.'):
+                    if key.isdigit():
+                        obj = obj[int(key)]
+                    else:
+                        obj = obj[key]
+                value = str(obj)
+            elif parser_type == 'python':
+                local_vars = {'text': raw}
+                exec_code = parser_config.strip()
+                # Wrap in function if not already
+                if 'return ' in exec_code and not exec_code.startswith('def '):
+                    exec_code = ('def _parse(text):\n' +
+                                 '\n'.join('    ' + l for l in exec_code.split('\n')) +
+                                 '\n_result = _parse(text)')
+                    exec(exec_code, {}, local_vars)
+                    value = str(local_vars.get('_result', ''))
+                else:
+                    exec(exec_code, {}, local_vars)
+                    value = str(local_vars.get('result', local_vars.get('_result', '')))
+            else:
+                value = ''
+                return jsonify({'error': f'Unknown parser type: {parser_type}', 'raw': raw})
+        except Exception as e:
+            return jsonify({'error': f'Parse failed: {e}', 'raw': raw})
+        return jsonify({'value': value, 'raw': raw})
+
+    @app.route('/api/network/data-source', methods=['GET'])
+    @login_required
+    def api_network_data_source_get():
+        """Return a single data source by stream_name."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        stream_name = request.args.get('stream_name')
+        if not stream_name:
+            return jsonify({'error': 'Missing stream_name'}), 400
+        ds = startup.networkDB.get_data_source(stream_name)
+        if not ds:
+            return jsonify({'error': 'Not found'}), 404
+        return jsonify({'data_source': ds})
+
+    @app.route('/api/network/data-source', methods=['POST'])
+    @login_required
+    def api_network_data_source_create():
+        """Create a new data source and its corresponding publication."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or not data.get('stream_name'):
+            return jsonify({'error': 'Missing stream_name'}), 400
+        url = data.get('url', '').strip()
+        cadence = data.get('cadence_seconds') or 0
+        parser_type = data.get('parser_type', '') if url else ''
+        parser_config = data.get('parser_config', '') if url else ''
+        # If URL is provided, parser config is required
+        if url and not parser_config:
+            return jsonify({'error': 'Parser config required when URL is set'}), 400
+        # Create the data source
+        startup.networkDB.add_data_source(
+            stream_name=data['stream_name'],
+            url=url,
+            cadence_seconds=cadence,
+            parser_type=parser_type,
+            parser_config=parser_config,
+            name=data.get('name', ''),
+            description=data.get('description', ''),
+            method=data.get('method', 'GET'),
+            headers=data.get('headers'))
+        # Create corresponding publication
+        startup.networkDB.add_publication(
+            stream_name=data['stream_name'],
+            name=data.get('name', ''),
+            description=data.get('description', ''),
+            cadence_seconds=cadence or None)
+        return jsonify({'success': True})
+
+    @app.route('/api/network/publish', methods=['POST'])
+    @login_required
+    def api_network_publish():
+        """Push a value to an existing publication.
+
+        For externally-fed streams where the neuron doesn't fetch data itself.
+        The caller provides the stream_name and value, and the neuron publishes
+        it to all connected relays.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'value' not in data:
+            return jsonify({'error': 'Missing stream_name or value'}), 400
+        stream_name = data['stream_name']
+        value = data['value']
+        # Verify publication exists
+        pubs = startup.networkDB.get_active_publications()
+        pub = next((p for p in pubs if p['stream_name'] == stream_name), None)
+        if not pub:
+            return jsonify({'error': f'No active publication: {stream_name}'}), 404
+        try:
+            startup.publishObservation(stream_name, value)
+            return jsonify({'success': True, 'stream_name': stream_name})
+        except Exception as e:
+            logger.error(f"Publish error: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/network/relays', methods=['GET'])
+    @login_required
+    def api_network_relays():
+        """Return all known relays merged from central + local DB."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        # Get relays from local DB (keyed by URL)
+        db_relays = {r['relay_url']: r for r in startup.networkDB.get_relays()}
+        # Merge in relays from central
+        try:
+            server_relays = startup.server.getRelays()
+            for r in server_relays:
+                url = r['relay_url']
+                if url not in db_relays:
+                    db_relays[url] = {
+                        'relay_url': url,
+                        'first_seen': None,
+                        'last_active': None,
+                        'source': 'server',
+                    }
+                else:
+                    db_relays[url]['source'] = 'both'
+        except Exception:
+            pass
+        # Mark source for DB-only relays
+        for url, r in db_relays.items():
+            if 'source' not in r:
+                r['source'] = 'local'
+        relays = sorted(db_relays.values(),
+                        key=lambda r: r.get('last_active') or 0, reverse=True)
+        return jsonify({'relays': relays})
+
+    @app.route('/api/network/relay', methods=['POST'])
+    @login_required
+    def api_network_relay_add():
+        """Add a relay to the local DB."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'relay_url' not in data:
+            return jsonify({'error': 'Missing relay_url'}), 400
+        relay_url = data['relay_url'].strip()
+        if not relay_url.startswith(('wss://', 'ws://')):
+            return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
+        startup.networkDB.upsert_relay(relay_url)
+        return jsonify({'success': True})
+
+    @app.route('/api/network/relay', methods=['DELETE'])
+    @login_required
+    def api_network_relay_delete():
+        """Delete a relay from the local DB."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'relay_url' not in data:
+            return jsonify({'error': 'Missing relay_url'}), 400
+        startup.networkDB.delete_relay(data['relay_url'])
+        return jsonify({'success': True})
